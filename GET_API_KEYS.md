@@ -121,36 +121,62 @@ Now you have these values from the `firebaseConfig`:
 1. **Go to OAuth Consent Screen**
    - In the left sidebar, click **"APIs & Services"** → **"OAuth consent screen"**
 
-2. **Choose User Type**
+2. **What You'll See** (depends on your account status)
+
+   **SCENARIO A: You see "Configure Consent Screen" or "User Type" selection**
    - Select **"External"** (allows anyone to sign in)
+   - Click **"Create"** or **"Configure"**
+   - Proceed to step 3 below
+
+   **SCENARIO B: You see an existing consent screen**
+   - If you see a configured app, click **"Edit App"** button
+   - Proceed to step 3 below
+
+   **SCENARIO C: You don't see "External" option**
+   - This happens if you're in a Google Workspace organization
+   - Select **"Internal"** (only for your organization)
    - Click **"Create"**
+   - Proceed to step 3 below
 
-3. **Fill Out App Information** (Page 1 of 4)
+3. **Fill Out App Information** (OAuth consent screen - Edit app registration)
    - **App name**: `Personal OS`
-   - **User support email**: Select your email
-   - **App logo**: Skip (optional)
-   - **App domain**: Leave blank for now
-   - **Developer contact**: Enter your email
-   - Click **"Save and Continue"**
+   - **User support email**: Select your email from dropdown
+   - **App logo**: Skip (optional - you can leave this empty)
+   - **App domain** section:
+     - Application home page: Leave blank (optional)
+     - Application privacy policy link: Leave blank (optional)
+     - Application terms of service link: Leave blank (optional)
+   - **Authorized domains**: Leave blank for now
+   - **Developer contact information**: Enter your email
+   - Click **"Save and Continue"** at the bottom
 
-4. **Scopes** (Page 2 of 4)
-   - Click **"Add or Remove Scopes"**
-   - In the filter box, type: `calendar`
-   - Check these two boxes:
-     - ✅ `https://www.googleapis.com/auth/calendar`
-     - ✅ `https://www.googleapis.com/auth/calendar.events`
-   - Scroll down and click **"Update"**
-   - Click **"Save and Continue"**
+4. **Scopes** (Add or remove scopes)
+   - You'll see "What scopes does your project need?"
+   - Click **"Add or Remove Scopes"** button
+   - A panel will slide in from the right with a long list
+   - In the **"Filter"** search box at the top, type: `calendar`
+   - Scroll and find these two scopes and check their boxes:
+     - ✅ `.../auth/calendar` - "See, edit, share, and permanently delete all the calendars you can access using Google Calendar"
+     - ✅ `.../auth/calendar.events` - "View and edit events on all your calendars"
+   - The full scope names are:
+     - `https://www.googleapis.com/auth/calendar`
+     - `https://www.googleapis.com/auth/calendar.events`
+   - Scroll down in the panel and click **"Update"** button
+   - Back on the main page, click **"Save and Continue"**
 
-5. **Test Users** (Page 3 of 4)
-   - Click **"Add Users"**
-   - Enter your email address
+5. **Test Users** (Optional test users)
+   - Click **"+ Add Users"** button
+   - Enter your email address (the one you're using to develop)
    - Click **"Add"**
    - Click **"Save and Continue"**
 
-6. **Summary** (Page 4 of 4)
-   - Review everything
-   - Click **"Back to Dashboard"**
+   **Note**: While your app is in "Testing" mode, only test users you add here can sign in.
+
+6. **Summary**
+   - Review all the information
+   - If everything looks good, click **"Back to Dashboard"**
+
+   **Important**: Your app will be in "Testing" mode. This is fine for development and personal use!
 
 ### Step 2.4: Create OAuth Client ID
 
@@ -161,9 +187,14 @@ Now you have these values from the `firebaseConfig`:
    - Click **"+ Create Credentials"** at the top
    - Select **"OAuth client ID"**
 
+   **If you see a blue box saying "To create an OAuth client ID, you must first configure your consent screen"**:
+   - Click **"Configure Consent Screen"**
+   - Go back to Step 2.3 above and complete the OAuth consent screen setup
+   - Then come back here
+
 3. **Choose Application Type**
-   - Application type: Select **"Web application"**
-   - Name: `Personal OS Web Client`
+   - Application type: Select **"Web application"** from the dropdown
+   - Name: `Personal OS Web Client` (or any name you prefer)
 
 4. **Add Authorized JavaScript Origins**
    - Under "Authorized JavaScript origins"
@@ -300,6 +331,42 @@ Now create a file called `.env` in your project root:
 2. Make sure the app is configured
 3. Add yourself as a test user
 4. Make sure Calendar scopes are added
+
+### Can't Find "External" or "Internal" Option in OAuth Consent Screen
+
+**Problem**: The OAuth consent screen interface looks different
+
+**Solution - You have several options**:
+
+**Option 1**: If you see "Edit App" button
+- Your consent screen is already configured
+- Click "Edit App" to modify it
+- Add the Calendar scopes if they're missing
+
+**Option 2**: If you're in a Google Workspace organization
+- You may only see "Internal" option (not "External")
+- This is fine - select "Internal"
+- Only people in your organization can use your app
+
+**Option 3**: If the page says OAuth is already configured
+- Click on "OAuth consent screen" in the left sidebar
+- Look for "Edit App" or "Configure" button
+- Update the app configuration to add Calendar scopes
+
+**Option 4**: Skip to creating credentials
+- Sometimes you can skip the consent screen setup initially
+- Go directly to Step 2.4 (Create OAuth Client ID)
+- Google will prompt you to configure consent screen if needed
+
+### "The app is in testing mode" Warning
+
+**Problem**: After setting up OAuth, you see "Testing" status
+
+**Solution**: This is completely NORMAL and expected!
+- Your app will work perfectly in testing mode
+- You can use it yourself and with test users you add
+- For personal use, you don't need to "publish" your app
+- To publish for everyone: Click "Publish App" on OAuth consent screen (optional)
 
 ### "Calendar API has not been used in project"
 
