@@ -102,10 +102,18 @@ function App() {
 
   // Load user data from Firestore
   const loadUserDataFromFirestore = async (userId) => {
+    console.log('📂 Loading user data for:', userId);
     try {
       const userData = await getUserData(userId);
 
       if (userData) {
+        console.log('✅ User data loaded successfully:', {
+          hasRuleOfThree: !!userData.ruleOfThree,
+          hasCards: !!userData.cards,
+          tasksCount: userData.cards ? Object.values(userData.cards).reduce((sum, col) => sum + col.length, 0) : 0,
+          lastUpdated: userData.lastUpdated
+        });
+
         setRuleOfThree(userData.ruleOfThree || ['', '', '']);
         setNonPriorityTasks(userData.nonPriorityTasks || ['', '']);
         setCards(userData.cards || { ideas: [], inProgress: [], readyToPublish: [], done: [] });
@@ -115,17 +123,28 @@ function App() {
         setPurposeOfUse(userData.purposeOfUse || '');
         setShowOnboarding(false);
       } else {
+        console.log('ℹ️ No existing user data found. Showing onboarding.');
         setShowOnboarding(true);
       }
     } catch (error) {
-      console.error('Error loading user data:', error);
-      alert('Failed to load your data. Please try refreshing the page.');
+      console.error('❌ Error loading user data:', error);
+      alert('Failed to load your data. Error: ' + error.message);
     }
   };
 
   // Save user data to Firestore
-  const saveUserDataToFirestore = async () => {
-    if (!user) return;
+  const saveUserDataToFirestore = async (showAlert = false) => {
+    if (!user) {
+      console.log('❌ Cannot save: No user signed in');
+      return;
+    }
+
+    console.log('💾 Saving user data...', {
+      userId: user.uid,
+      tasksCount: Object.values(cards).reduce((sum, col) => sum + col.length, 0),
+      rolesCount: userRoles.length,
+      hubsCount: userHubs.length
+    });
 
     try {
       await saveUserData(user.uid, {
@@ -138,8 +157,15 @@ function App() {
         purposeOfUse,
         lastUpdated: new Date().toISOString(),
       });
+      console.log('✅ Data saved successfully at', new Date().toLocaleTimeString());
+      if (showAlert) {
+        alert('✅ Data saved successfully!');
+      }
     } catch (error) {
-      console.error('Error saving user data:', error);
+      console.error('❌ Error saving user data:', error);
+      if (showAlert) {
+        alert('❌ Failed to save data: ' + error.message);
+      }
     }
   };
 
@@ -549,26 +575,31 @@ function App() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-lg text-gray-600">Loading...</div>
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-amber-50 via-orange-50 to-yellow-50">
+        <div className="text-lg text-gray-700 flex items-center gap-3">
+          <div className="animate-spin text-orange-500">☀️</div>
+          Loading your workspace...
+        </div>
       </div>
     );
   }
 
   if (!user) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center space-y-6 p-8 bg-white rounded-lg shadow-sm border border-gray-200 max-w-md">
-          <div className="space-y-2">
-            <LayoutGrid className="mx-auto text-gray-700" size={48} />
-            <h1 className="text-4xl font-bold text-gray-900">Personal OS</h1>
-            <p className="text-lg text-gray-600">Daily Productivity App</p>
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-amber-100 via-orange-100 to-yellow-100">
+        <div className="text-center space-y-8 p-8 bg-white/70 backdrop-blur-sm rounded-3xl shadow-2xl border-2 border-orange-200">
+          <div className="space-y-4">
+            <div className="text-6xl animate-float">☀️</div>
+            <h1 className="text-6xl font-bold gradient-summer">
+              Personal OS
+            </h1>
+            <p className="text-2xl text-gray-700 font-light">Daily Productivity App</p>
           </div>
           <button
             onClick={handleSignIn}
-            className="px-8 py-3 bg-gray-900 text-white rounded-lg font-medium hover:bg-gray-800 transition-colors flex items-center gap-3 mx-auto"
+            className="px-8 py-4 bg-gradient-to-r from-orange-400 to-amber-400 text-white rounded-2xl font-semibold hover:from-orange-500 hover:to-amber-500 transition-all transform hover:scale-105 flex items-center gap-3 mx-auto shadow-lg"
           >
-            <User size={20} />
+            <User size={24} />
             Sign in with Google
           </button>
         </div>
@@ -579,11 +610,12 @@ function App() {
   // Onboarding
   if (showOnboarding) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
-        <div className="max-w-2xl w-full bg-white rounded-lg shadow-sm border border-gray-200 p-8">
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-amber-100 via-orange-100 to-yellow-100 p-4">
+        <div className="max-w-2xl w-full bg-white/90 backdrop-blur-sm rounded-3xl shadow-2xl p-8 border-2 border-orange-200">
           <div className="text-center mb-8">
-            <h2 className="text-3xl font-bold text-gray-900 mb-2">Welcome! 👋</h2>
-            <p className="text-gray-600">Let's set up your workspace</p>
+            <div className="text-6xl mb-4 animate-float">☀️</div>
+            <h2 className="text-4xl font-bold gradient-summer mb-2">Welcome! 🎉</h2>
+            <p className="text-gray-600">Let's personalize your workspace</p>
           </div>
 
           {onboardingStep === 0 && (
@@ -700,63 +732,73 @@ function App() {
   const stats = getTaskStats();
 
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-900">
-      {/* Header - Notion style */}
-      <header className="border-b border-gray-200 bg-white sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-6 py-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <LayoutGrid className="text-gray-700" size={24} />
-              <h1 className="text-xl font-semibold text-gray-900">Personal OS</h1>
+    <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-yellow-50 text-gray-800">
+      {/* Header */}
+      <header className="border-b-2 border-orange-200 bg-white/70 backdrop-blur-sm sticky top-0 z-50 shadow-sm">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-2 sm:gap-3">
+              <div className="text-3xl animate-float">☀️</div>
+              <h1 className="text-lg sm:text-2xl font-bold gradient-summer">
+                Personal OS
+              </h1>
             </div>
 
             {/* Tab Navigation */}
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-2 bg-orange-100/50 rounded-xl p-1">
               <button
                 onClick={() => setActiveTab('kanban')}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                className={`px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 ${
                   activeTab === 'kanban'
-                    ? 'bg-gray-100 text-gray-900'
-                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                    ? 'bg-white text-orange-600 shadow-md'
+                    : 'text-gray-600 hover:text-orange-600'
                 }`}
               >
-                <LayoutGrid size={16} className="inline mr-2" />
-                Board
+                <LayoutGrid size={18} />
+                <span className="hidden sm:inline">Board</span>
               </button>
               <button
                 onClick={() => setActiveTab('calendar')}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                className={`px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 ${
                   activeTab === 'calendar'
-                    ? 'bg-gray-100 text-gray-900'
-                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                    ? 'bg-white text-orange-600 shadow-md'
+                    : 'text-gray-600 hover:text-orange-600'
                 }`}
               >
-                <CalendarIcon size={16} className="inline mr-2" />
-                Calendar
+                <CalendarIcon size={18} />
+                <span className="hidden sm:inline">Calendar</span>
               </button>
               <button
                 onClick={() => setActiveTab('analytics')}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                className={`px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 ${
                   activeTab === 'analytics'
-                    ? 'bg-gray-100 text-gray-900'
-                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                    ? 'bg-white text-orange-600 shadow-md'
+                    : 'text-gray-600 hover:text-orange-600'
                 }`}
               >
-                <BarChart3 size={16} className="inline mr-2" />
-                Analytics
+                <BarChart3 size={18} />
+                <span className="hidden sm:inline">Analytics</span>
               </button>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 sm:gap-4">
+              <button
+                onClick={() => saveUserDataToFirestore(true)}
+                className="px-3 sm:px-4 py-2 bg-gradient-to-r from-green-400 to-emerald-400 hover:from-green-500 hover:to-emerald-500 text-white rounded-xl flex items-center gap-2 transition-all transform hover:scale-105 shadow-md text-sm"
+                title="Save data now"
+              >
+                💾 Save
+              </button>
               <button
                 onClick={handleSyncToCalendar}
-                className="px-3 py-2 bg-gray-900 text-white rounded-md text-sm font-medium hover:bg-gray-800 transition-colors"
+                className="px-3 sm:px-4 py-2 bg-gradient-to-r from-blue-400 to-cyan-400 hover:from-blue-500 hover:to-cyan-500 text-white rounded-xl flex items-center gap-2 transition-all transform hover:scale-105 shadow-md text-sm"
               >
-                Sync
+                <CalendarIcon size={16} />
+                <span className="hidden sm:inline">Sync</span>
               </button>
               <button
                 onClick={triggerOnboarding}
-                className="p-2 hover:bg-gray-100 rounded-md transition-colors"
+                className="p-2 hover:bg-orange-100 rounded-xl transition-colors"
                 title="Settings"
               >
                 <Settings size={18} className="text-gray-600" />
