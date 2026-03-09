@@ -6,44 +6,46 @@ import {
   LogOut,
   Calendar as CalendarIcon,
   Trash2,
-  Edit2,
   X,
-  Sparkles,
   User,
   MoreVertical,
   Copy,
   Clock,
   Search,
   FileText,
-  Sun,
-  Palmtree,
   LayoutGrid,
-  Home,
   Check,
   Settings,
+  BarChart3,
+  PieChart,
+  TrendingUp,
+  Edit,
+  ChevronLeft,
+  ChevronRight,
+  Folder,
 } from 'lucide-react';
 import { auth, signInWithGoogle, signOutUser, getUserData, saveUserData } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { getCalendarEvents, syncTasksToCalendar } from './utils/calendar';
 
 const DEFAULT_ROLES = [
-  { id: 'work', label: 'Work', color: 'bg-blue-400', hub: 'career' },
-  { id: 'personal', label: 'Personal', color: 'bg-green-400', hub: 'personal' },
-  { id: 'learning', label: 'Learning', color: 'bg-purple-400', hub: 'growth' },
+  { id: 'work', label: 'Work', color: 'bg-blue-500', hub: 'career' },
+  { id: 'personal', label: 'Personal', color: 'bg-green-500', hub: 'personal' },
+  { id: 'learning', label: 'Learning', color: 'bg-purple-500', hub: 'growth' },
 ];
 
-const HUBS = [
-  { id: 'all', label: 'All Tasks', icon: Sparkles, color: 'text-orange-500' },
-  { id: 'career', label: '💼 Career', icon: Home, color: 'text-blue-500' },
-  { id: 'personal', label: '🌴 Personal', icon: Palmtree, color: 'text-green-500' },
-  { id: 'growth', label: '🌱 Growth', icon: Sun, color: 'text-purple-500' },
+const DEFAULT_HUBS = [
+  { id: 'all', label: 'All Tasks', icon: 'LayoutGrid', color: '#6B7280' },
+  { id: 'career', label: 'Career', icon: 'Briefcase', color: '#3B82F6' },
+  { id: 'personal', label: 'Personal', icon: 'Home', color: '#10B981' },
+  { id: 'growth', label: 'Growth', icon: 'TrendingUp', color: '#8B5CF6' },
 ];
 
 const COLUMNS = {
-  ideas: { id: 'ideas', title: '💡 Ideas', color: 'border-amber-300 bg-amber-50/50' },
-  inProgress: { id: 'inProgress', title: '🚀 In Progress', color: 'border-orange-300 bg-orange-50/50' },
-  readyToPublish: { id: 'readyToPublish', title: '✨ Ready', color: 'border-green-300 bg-green-50/50' },
-  done: { id: 'done', title: '✅ Done', color: 'border-gray-300 bg-gray-50/50' },
+  ideas: { id: 'ideas', title: 'Ideas', color: 'border-l-gray-400' },
+  inProgress: { id: 'inProgress', title: 'In Progress', color: 'border-l-blue-500' },
+  readyToPublish: { id: 'readyToPublish', title: 'Ready', color: 'border-l-green-500' },
+  done: { id: 'done', title: 'Done', color: 'border-l-gray-300' },
 };
 
 function App() {
@@ -51,13 +53,16 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [onboardingStep, setOnboardingStep] = useState(0);
-  const [activeTab, setActiveTab] = useState('kanban'); // 'kanban' or 'calendar'
+  const [activeTab, setActiveTab] = useState('kanban'); // 'kanban', 'calendar', 'analytics'
 
   // User settings
   const [userRoles, setUserRoles] = useState(DEFAULT_ROLES);
+  const [userHubs, setUserHubs] = useState(DEFAULT_HUBS);
   const [areasOfFocus, setAreasOfFocus] = useState('');
   const [purposeOfUse, setPurposeOfUse] = useState('');
   const [customTags, setCustomTags] = useState(['']);
+  const [showHubManager, setShowHubManager] = useState(false);
+  const [editingHub, setEditingHub] = useState(null);
 
   // App state
   const [ruleOfThree, setRuleOfThree] = useState(['', '', '']);
@@ -75,6 +80,10 @@ function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedCard, setExpandedCard] = useState(null);
   const [showCardMenu, setShowCardMenu] = useState(null);
+
+  // Calendar state
+  const [currentDate, setCurrentDate] = useState(new Date());
+  const [selectedDate, setSelectedDate] = useState(null);
 
   // Authentication listener
   useEffect(() => {
@@ -97,20 +106,20 @@ function App() {
       const userData = await getUserData(userId);
 
       if (userData) {
-        // Existing user
         setRuleOfThree(userData.ruleOfThree || ['', '', '']);
         setNonPriorityTasks(userData.nonPriorityTasks || ['', '']);
         setCards(userData.cards || { ideas: [], inProgress: [], readyToPublish: [], done: [] });
         setUserRoles(userData.customRoles || DEFAULT_ROLES);
+        setUserHubs(userData.userHubs || DEFAULT_HUBS);
         setAreasOfFocus(userData.areasOfFocus || '');
         setPurposeOfUse(userData.purposeOfUse || '');
         setShowOnboarding(false);
       } else {
-        // New user - show onboarding
         setShowOnboarding(true);
       }
     } catch (error) {
       console.error('Error loading user data:', error);
+      alert('Failed to load your data. Please try refreshing the page.');
     }
   };
 
@@ -124,6 +133,7 @@ function App() {
         nonPriorityTasks,
         cards,
         customRoles: userRoles,
+        userHubs,
         areasOfFocus,
         purposeOfUse,
         lastUpdated: new Date().toISOString(),
@@ -133,42 +143,36 @@ function App() {
     }
   };
 
-  // Auto-save on data change
+  // Auto-save
   useEffect(() => {
     if (user && !showOnboarding) {
       const timer = setTimeout(() => {
         saveUserDataToFirestore();
-      }, 1000); // Debounce saves
-
+      }, 1000);
       return () => clearTimeout(timer);
     }
-  }, [ruleOfThree, nonPriorityTasks, cards, user, showOnboarding]);
+  }, [ruleOfThree, nonPriorityTasks, cards, userRoles, userHubs, user, showOnboarding]);
 
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyPress = (e) => {
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
-        return;
-      }
-
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
       if (e.key === '/') {
         e.preventDefault();
         document.querySelector('input[placeholder*="Search"]')?.focus();
       }
-
       if (e.key === 'n') {
         e.preventDefault();
         document.querySelector('input[placeholder*="Quickly"]')?.focus();
       }
-
       if (e.key === 'Escape') {
         setSearchQuery('');
         setShowCardMenu(null);
         setExpandedCard(null);
         setEditingCard(null);
+        setShowHubManager(false);
       }
     };
-
     window.addEventListener('keydown', handleKeyPress);
     return () => window.removeEventListener('keydown', handleKeyPress);
   }, []);
@@ -186,9 +190,8 @@ function App() {
     }
   };
 
-  // Handle onboarding completion
+  // Onboarding completion
   const completeOnboarding = async () => {
-    // Convert custom tags to roles
     const newRoles = customTags
       .filter(tag => tag.trim() !== '')
       .slice(0, 10)
@@ -196,18 +199,17 @@ function App() {
         id: `custom-${index}`,
         label: tag.trim(),
         color: [
-          'bg-rose-400', 'bg-pink-400', 'bg-fuchsia-400', 'bg-purple-400',
-          'bg-violet-400', 'bg-indigo-400', 'bg-blue-400', 'bg-cyan-400',
-          'bg-teal-400', 'bg-emerald-400'
+          'bg-red-500', 'bg-orange-500', 'bg-amber-500', 'bg-yellow-500', 'bg-lime-500',
+          'bg-green-500', 'bg-teal-500', 'bg-cyan-500', 'bg-blue-500', 'bg-purple-500'
         ][index % 10],
         hub: 'personal',
       }));
 
     setUserRoles([...DEFAULT_ROLES, ...newRoles]);
 
-    // Save to Firestore
     await saveUserData(user.uid, {
       customRoles: [...DEFAULT_ROLES, ...newRoles],
+      userHubs: DEFAULT_HUBS,
       areasOfFocus,
       purposeOfUse,
       ruleOfThree: ['', '', ''],
@@ -219,7 +221,7 @@ function App() {
     setShowOnboarding(false);
   };
 
-  // Handle sign in
+  // Sign in/out
   const handleSignIn = async () => {
     try {
       await signInWithGoogle();
@@ -228,33 +230,32 @@ function App() {
     }
   };
 
-  // Handle sign out
   const handleSignOut = async () => {
     try {
       await signOutUser();
       setRuleOfThree(['', '', '']);
+      setNonPriorityTasks(['', '']);
       setCards({ ideas: [], inProgress: [], readyToPublish: [], done: [] });
       setUserRoles(DEFAULT_ROLES);
+      setUserHubs(DEFAULT_HUBS);
     } catch (error) {
       alert('Failed to sign out: ' + error.message);
     }
   };
 
-  // Handle Rule of 3 changes
+  // Task handlers
   const handleRuleChange = (index, value) => {
     const newRules = [...ruleOfThree];
     newRules[index] = value;
     setRuleOfThree(newRules);
   };
 
-  // Handle non-priority task changes
   const handleNonPriorityChange = (index, value) => {
     const newTasks = [...nonPriorityTasks];
     newTasks[index] = value;
     setNonPriorityTasks(newTasks);
   };
 
-  // Add all tasks to board
   const handleAddToBoard = () => {
     const allTasks = [...ruleOfThree, ...nonPriorityTasks];
     const tasksToAdd = allTasks.filter(task => task.trim() !== '');
@@ -269,7 +270,7 @@ function App() {
       title: task,
       description: '',
       roles: [],
-      priority: index < 3 ? 'high' : 'low', // First 3 are priority
+      priority: index < 3 ? 'high' : 'low',
       dueDate: null,
       createdAt: new Date().toISOString(),
     }));
@@ -279,24 +280,19 @@ function App() {
       ideas: [...prev.ideas, ...newCards],
     }));
 
-    // Clear the tasks after adding
     setRuleOfThree(['', '', '']);
     setNonPriorityTasks(['', '']);
-
-    alert(`Added ${tasksToAdd.length} task(s) to the board! 🎉`);
+    alert(`Added ${tasksToAdd.length} task(s) to the board! ✅`);
   };
 
-  // Trigger onboarding manually
   const triggerOnboarding = () => {
     setOnboardingStep(0);
     setCustomTags(['']);
     setShowOnboarding(true);
   };
 
-  // Handle Quick Capture
   const handleQuickCapture = () => {
     if (!quickCapture.trim()) return;
-
     const newCard = {
       id: Date.now().toString(),
       title: quickCapture,
@@ -306,18 +302,12 @@ function App() {
       dueDate: null,
       createdAt: new Date().toISOString(),
     };
-
-    setCards((prev) => ({
-      ...prev,
-      ideas: [...prev.ideas, newCard],
-    }));
+    setCards((prev) => ({ ...prev, ideas: [...prev.ideas, newCard] }));
     setQuickCapture('');
   };
 
-  // Handle Drag End
   const handleDragEnd = (result) => {
     const { source, destination } = result;
-
     if (!destination) return;
     if (source.droppableId === destination.droppableId && source.index === destination.index) return;
 
@@ -336,15 +326,15 @@ function App() {
     });
   };
 
-  // Delete card
   const handleDeleteCard = (columnId, cardId) => {
-    setCards((prev) => ({
-      ...prev,
-      [columnId]: prev[columnId].filter((c) => c.id !== cardId),
-    }));
+    if (confirm('Delete this task?')) {
+      setCards((prev) => ({
+        ...prev,
+        [columnId]: prev[columnId].filter((c) => c.id !== cardId),
+      }));
+    }
   };
 
-  // Toggle role on card
   const toggleRole = (columnId, cardId, roleId) => {
     setCards((prev) => ({
       ...prev,
@@ -360,7 +350,6 @@ function App() {
     }));
   };
 
-  // Update card field
   const updateCardField = (columnId, cardId, field, value) => {
     setCards((prev) => ({
       ...prev,
@@ -370,7 +359,6 @@ function App() {
     }));
   };
 
-  // Duplicate card
   const duplicateCard = (columnId, card) => {
     const newCard = {
       ...card,
@@ -378,22 +366,16 @@ function App() {
       title: `${card.title} (Copy)`,
       createdAt: new Date().toISOString(),
     };
-    setCards((prev) => ({
-      ...prev,
-      [columnId]: [...prev[columnId], newCard],
-    }));
+    setCards((prev) => ({ ...prev, [columnId]: [...prev[columnId], newCard] }));
     setShowCardMenu(null);
   };
 
-  // Toggle card expansion
   const toggleCardExpansion = (cardId) => {
     setExpandedCard(expandedCard === cardId ? null : cardId);
   };
 
-  // Filter cards by hub and search
   const filterCardsByHub = (cardList) => {
     let filtered = cardList;
-
     if (selectedHub !== 'all') {
       filtered = filtered.filter((card) =>
         card.roles.some((roleId) => {
@@ -402,7 +384,6 @@ function App() {
         })
       );
     }
-
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
       filtered = filtered.filter(
@@ -411,24 +392,20 @@ function App() {
           (card.description && card.description.toLowerCase().includes(query))
       );
     }
-
     return filtered;
   };
 
-  // Sync to calendar
   const handleSyncToCalendar = async () => {
     const accessToken = localStorage.getItem('google_access_token');
     if (!accessToken) {
       alert('Please sign out and sign in again to refresh your Google Calendar access.');
       return;
     }
-
     const tasksToSync = cards.readyToPublish;
     if (tasksToSync.length === 0) {
       alert('No tasks in "Ready" column to sync!');
       return;
     }
-
     try {
       const tasksData = tasksToSync.map((card) => ({
         id: card.id,
@@ -437,98 +414,194 @@ function App() {
         startTime: new Date().toISOString(),
         endTime: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
       }));
-
       const result = await syncTasksToCalendar(accessToken, tasksData);
-      alert(`Successfully synced ${result.syncedTasks.length} tasks!`);
+      alert(`Synced ${result.syncedTasks.length} tasks! ✅`);
       loadCalendarEvents();
     } catch (error) {
-      console.error('Calendar sync error:', error);
-      alert('Failed to sync to calendar. Please try again.');
+      alert('Failed to sync. Please try signing in again.');
     }
   };
 
-  // Add custom tag input
+  // Custom tag management
   const addCustomTagInput = () => {
-    if (customTags.length < 10) {
-      setCustomTags([...customTags, '']);
-    }
+    if (customTags.length < 10) setCustomTags([...customTags, '']);
   };
 
-  // Update custom tag
   const updateCustomTag = (index, value) => {
     const newTags = [...customTags];
     newTags[index] = value;
     setCustomTags(newTags);
   };
 
-  // Remove custom tag
   const removeCustomTag = (index) => {
     const newTags = customTags.filter((_, i) => i !== index);
     setCustomTags(newTags.length > 0 ? newTags : ['']);
   };
 
+  // Hub management
+  const addHub = () => {
+    const newHub = {
+      id: `hub-${Date.now()}`,
+      label: 'New Category',
+      icon: 'Folder',
+      color: '#6B7280',
+    };
+    setUserHubs([...userHubs, newHub]);
+    setEditingHub(newHub.id);
+  };
+
+  const updateHub = (hubId, field, value) => {
+    setUserHubs(userHubs.map(hub =>
+      hub.id === hubId ? { ...hub, [field]: value } : hub
+    ));
+  };
+
+  const deleteHub = (hubId) => {
+    if (hubId === 'all') {
+      alert('Cannot delete the "All Tasks" category');
+      return;
+    }
+    if (confirm('Delete this category? Tasks will not be deleted.')) {
+      setUserHubs(userHubs.filter(hub => hub.id !== hubId));
+      if (selectedHub === hubId) setSelectedHub('all');
+    }
+  };
+
+  // Analytics calculations
+  const getTaskStats = () => {
+    const allCards = [...cards.ideas, ...cards.inProgress, ...cards.readyToPublish, ...cards.done];
+
+    // Tasks by hub
+    const tasksByHub = {};
+    userHubs.forEach(hub => {
+      if (hub.id !== 'all') {
+        tasksByHub[hub.label] = 0;
+      }
+    });
+
+    allCards.forEach(card => {
+      card.roles.forEach(roleId => {
+        const role = userRoles.find(r => r.id === roleId);
+        if (role) {
+          const hub = userHubs.find(h => h.id === role.hub);
+          if (hub && hub.id !== 'all') {
+            tasksByHub[hub.label] = (tasksByHub[hub.label] || 0) + 1;
+          }
+        }
+      });
+    });
+
+    // Tasks by status
+    const tasksByStatus = {
+      'Ideas': cards.ideas.length,
+      'In Progress': cards.inProgress.length,
+      'Ready': cards.readyToPublish.length,
+      'Done': cards.done.length,
+    };
+
+    // Tasks by priority
+    const tasksByPriority = {
+      'High': allCards.filter(c => c.priority === 'high').length,
+      'Medium': allCards.filter(c => c.priority === 'medium').length,
+      'Low': allCards.filter(c => c.priority === 'low').length,
+    };
+
+    return { tasksByHub, tasksByStatus, tasksByPriority, totalTasks: allCards.length };
+  };
+
+  // Calendar utilities
+  const getDaysInMonth = (date) => {
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const daysInMonth = lastDay.getDate();
+    const startingDayOfWeek = firstDay.getDay();
+
+    const days = [];
+    for (let i = 0; i < startingDayOfWeek; i++) {
+      days.push(null);
+    }
+    for (let i = 1; i <= daysInMonth; i++) {
+      days.push(new Date(year, month, i));
+    }
+    return days;
+  };
+
+  const formatMonthYear = (date) => {
+    return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  };
+
+  const isSameDay = (date1, date2) => {
+    if (!date1 || !date2) return false;
+    return date1.toDateString() === date2.toDateString();
+  };
+
+  const getTasksForDate = (date) => {
+    if (!date) return [];
+    const allCards = [...cards.ideas, ...cards.inProgress, ...cards.readyToPublish, ...cards.done];
+    return allCards.filter(card => {
+      if (!card.dueDate) return false;
+      const cardDate = new Date(card.dueDate);
+      return isSameDay(cardDate, date);
+    });
+  };
+
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-amber-50 via-orange-50 to-yellow-50">
-        <div className="text-xl text-gray-700 flex items-center gap-3">
-          <Sun className="animate-spin text-orange-500" size={32} />
-          Loading your workspace...
-        </div>
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-lg text-gray-600">Loading...</div>
       </div>
     );
   }
 
   if (!user) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-amber-100 via-orange-100 to-yellow-100">
-        <div className="text-center space-y-8 p-8 bg-white/70 backdrop-blur-sm rounded-3xl shadow-2xl border-2 border-orange-200">
-          <div className="space-y-4">
-            <Sun className="mx-auto text-orange-500 animate-float" size={80} />
-            <h1 className="text-6xl font-bold gradient-summer">
-              Personal OS
-            </h1>
-            <p className="text-2xl text-gray-700 font-light">Your Summer Productivity Hub ☀️🌴</p>
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center space-y-6 p-8 bg-white rounded-lg shadow-sm border border-gray-200 max-w-md">
+          <div className="space-y-2">
+            <LayoutGrid className="mx-auto text-gray-700" size={48} />
+            <h1 className="text-4xl font-bold text-gray-900">Personal OS</h1>
+            <p className="text-lg text-gray-600">Daily Productivity App</p>
           </div>
           <button
             onClick={handleSignIn}
-            className="px-8 py-4 bg-gradient-to-r from-orange-400 to-amber-400 text-white rounded-2xl font-semibold hover:from-orange-500 hover:to-amber-500 transition-all transform hover:scale-105 flex items-center gap-3 mx-auto shadow-lg"
+            className="px-8 py-3 bg-gray-900 text-white rounded-lg font-medium hover:bg-gray-800 transition-colors flex items-center gap-3 mx-auto"
           >
-            <User size={24} />
+            <User size={20} />
             Sign in with Google
           </button>
-          <p className="text-sm text-gray-600">✨ Join up to 100 users managing their productivity!</p>
         </div>
       </div>
     );
   }
 
-  // Onboarding Flow
+  // Onboarding
   if (showOnboarding) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-amber-100 via-orange-100 to-yellow-100 p-4">
-        <div className="max-w-2xl w-full bg-white/90 backdrop-blur-sm rounded-3xl shadow-2xl p-8 border-2 border-orange-200">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
+        <div className="max-w-2xl w-full bg-white rounded-lg shadow-sm border border-gray-200 p-8">
           <div className="text-center mb-8">
-            <Sun className="mx-auto text-orange-500 mb-4 animate-float" size={64} />
-            <h2 className="text-4xl font-bold gradient-summer mb-2">Welcome to Personal OS! 🎉</h2>
-            <p className="text-gray-600">Let's personalize your workspace</p>
+            <h2 className="text-3xl font-bold text-gray-900 mb-2">Welcome! 👋</h2>
+            <p className="text-gray-600">Let's set up your workspace</p>
           </div>
 
           {onboardingStep === 0 && (
             <div className="space-y-6">
               <div>
-                <label className="block text-lg font-semibold text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
                   What are your main areas of focus?
                 </label>
                 <textarea
                   value={areasOfFocus}
                   onChange={(e) => setAreasOfFocus(e.target.value)}
-                  placeholder="E.g., Software development, content creation, fitness, learning..."
-                  className="w-full bg-white border-2 border-orange-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-orange-400 text-gray-800 placeholder-gray-400 min-h-[100px]"
+                  placeholder="E.g., Software development, fitness, learning..."
+                  className="w-full bg-white border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent text-gray-900 min-h-[100px]"
                 />
               </div>
               <button
                 onClick={() => setOnboardingStep(1)}
-                className="w-full px-6 py-4 bg-gradient-to-r from-orange-400 to-amber-400 text-white rounded-xl font-semibold hover:from-orange-500 hover:to-amber-500 transition-all transform hover:scale-105"
+                className="w-full px-6 py-3 bg-gray-900 text-white rounded-lg font-medium hover:bg-gray-800 transition-colors"
               >
                 Next →
               </button>
@@ -538,26 +611,26 @@ function App() {
           {onboardingStep === 1 && (
             <div className="space-y-6">
               <div>
-                <label className="block text-lg font-semibold text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
                   What are you using this for?
                 </label>
                 <textarea
                   value={purposeOfUse}
                   onChange={(e) => setPurposeOfUse(e.target.value)}
-                  placeholder="E.g., Managing multiple projects, tracking habits, organizing life..."
-                  className="w-full bg-white border-2 border-orange-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-orange-400 text-gray-800 placeholder-gray-400 min-h-[100px]"
+                  placeholder="E.g., Managing projects, tracking habits..."
+                  className="w-full bg-white border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent text-gray-900 min-h-[100px]"
                 />
               </div>
               <div className="flex gap-3">
                 <button
                   onClick={() => setOnboardingStep(0)}
-                  className="flex-1 px-6 py-4 bg-gray-200 text-gray-700 rounded-xl font-semibold hover:bg-gray-300 transition-all"
+                  className="flex-1 px-6 py-3 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 transition-colors"
                 >
                   ← Back
                 </button>
                 <button
                   onClick={() => setOnboardingStep(2)}
-                  className="flex-1 px-6 py-4 bg-gradient-to-r from-orange-400 to-amber-400 text-white rounded-xl font-semibold hover:from-orange-500 hover:to-amber-500 transition-all"
+                  className="flex-1 px-6 py-3 bg-gray-900 text-white rounded-lg font-medium hover:bg-gray-800 transition-colors"
                 >
                   Next →
                 </button>
@@ -568,26 +641,23 @@ function App() {
           {onboardingStep === 2 && (
             <div className="space-y-6">
               <div>
-                <label className="block text-lg font-semibold text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
                   Create your custom tags (up to 10)
                 </label>
-                <p className="text-sm text-gray-600 mb-4">
-                  These will help you organize and categorize your tasks
-                </p>
-                <div className="space-y-3 max-h-[400px] overflow-y-auto scrollbar-thin">
+                <div className="space-y-3 max-h-[400px] overflow-y-auto">
                   {customTags.map((tag, index) => (
                     <div key={index} className="flex gap-2">
                       <input
                         type="text"
                         value={tag}
                         onChange={(e) => updateCustomTag(index, e.target.value)}
-                        placeholder={`Tag ${index + 1} (e.g., Work, Fitness, Learning)`}
-                        className="flex-1 bg-white border-2 border-orange-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-orange-400 text-gray-800 placeholder-gray-400"
+                        placeholder={`Tag ${index + 1}`}
+                        className="flex-1 bg-white border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent text-gray-900"
                       />
                       {customTags.length > 1 && (
                         <button
                           onClick={() => removeCustomTag(index)}
-                          className="p-3 bg-red-100 text-red-600 rounded-xl hover:bg-red-200 transition-colors"
+                          className="p-3 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                         >
                           <X size={20} />
                         </button>
@@ -598,26 +668,26 @@ function App() {
                 {customTags.length < 10 && (
                   <button
                     onClick={addCustomTagInput}
-                    className="mt-3 w-full px-4 py-3 bg-orange-100 text-orange-700 rounded-xl font-semibold hover:bg-orange-200 transition-all flex items-center justify-center gap-2"
+                    className="mt-3 w-full px-4 py-3 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors flex items-center justify-center gap-2"
                   >
                     <Plus size={20} />
-                    Add Another Tag
+                    Add Tag
                   </button>
                 )}
               </div>
               <div className="flex gap-3">
                 <button
                   onClick={() => setOnboardingStep(1)}
-                  className="flex-1 px-6 py-4 bg-gray-200 text-gray-700 rounded-xl font-semibold hover:bg-gray-300 transition-all"
+                  className="flex-1 px-6 py-3 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 transition-colors"
                 >
                   ← Back
                 </button>
                 <button
                   onClick={completeOnboarding}
-                  className="flex-1 px-6 py-4 bg-gradient-to-r from-green-400 to-emerald-400 text-white rounded-xl font-semibold hover:from-green-500 hover:to-emerald-500 transition-all flex items-center justify-center gap-2"
+                  className="flex-1 px-6 py-3 bg-gray-900 text-white rounded-lg font-medium hover:bg-gray-800 transition-colors flex items-center justify-center gap-2"
                 >
                   <Check size={20} />
-                  Complete Setup
+                  Complete
                 </button>
               </div>
             </div>
@@ -627,67 +697,77 @@ function App() {
     );
   }
 
+  const stats = getTaskStats();
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-yellow-50 text-gray-800">
-      {/* Header */}
-      <header className="border-b-2 border-orange-200 bg-white/70 backdrop-blur-sm sticky top-0 z-50 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4">
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-2 sm:gap-3">
-              <Sun className="text-orange-500 animate-float" size={28} />
-              <h1 className="text-lg sm:text-2xl font-bold gradient-summer">
-                Personal OS
-              </h1>
+    <div className="min-h-screen bg-gray-50 text-gray-900">
+      {/* Header - Notion style */}
+      <header className="border-b border-gray-200 bg-white sticky top-0 z-50">
+        <div className="max-w-7xl mx-auto px-6 py-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <LayoutGrid className="text-gray-700" size={24} />
+              <h1 className="text-xl font-semibold text-gray-900">Personal OS</h1>
             </div>
 
             {/* Tab Navigation */}
-            <div className="flex items-center gap-2 bg-orange-100/50 rounded-xl p-1">
+            <div className="flex items-center gap-1">
               <button
                 onClick={() => setActiveTab('kanban')}
-                className={`px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 ${
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
                   activeTab === 'kanban'
-                    ? 'bg-white text-orange-600 shadow-md'
-                    : 'text-gray-600 hover:text-orange-600'
+                    ? 'bg-gray-100 text-gray-900'
+                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
                 }`}
               >
-                <LayoutGrid size={18} />
-                <span className="hidden sm:inline">Kanban</span>
+                <LayoutGrid size={16} className="inline mr-2" />
+                Board
               </button>
               <button
                 onClick={() => setActiveTab('calendar')}
-                className={`px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 ${
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
                   activeTab === 'calendar'
-                    ? 'bg-white text-orange-600 shadow-md'
-                    : 'text-gray-600 hover:text-orange-600'
+                    ? 'bg-gray-100 text-gray-900'
+                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
                 }`}
               >
-                <CalendarIcon size={18} />
-                <span className="hidden sm:inline">Calendar</span>
+                <CalendarIcon size={16} className="inline mr-2" />
+                Calendar
+              </button>
+              <button
+                onClick={() => setActiveTab('analytics')}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                  activeTab === 'analytics'
+                    ? 'bg-gray-100 text-gray-900'
+                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                }`}
+              >
+                <BarChart3 size={16} className="inline mr-2" />
+                Analytics
               </button>
             </div>
 
-            <div className="flex items-center gap-2 sm:gap-4">
+            <div className="flex items-center gap-2">
               <button
                 onClick={handleSyncToCalendar}
-                className="px-3 sm:px-4 py-2 bg-gradient-to-r from-green-400 to-emerald-400 hover:from-green-500 hover:to-emerald-500 text-white rounded-xl flex items-center gap-2 transition-all transform hover:scale-105 shadow-md text-sm"
+                className="px-3 py-2 bg-gray-900 text-white rounded-md text-sm font-medium hover:bg-gray-800 transition-colors"
               >
-                <CalendarIcon size={16} />
-                <span className="hidden sm:inline">Sync</span>
+                Sync
               </button>
               <button
                 onClick={triggerOnboarding}
-                className="p-2 hover:bg-orange-100 rounded-xl transition-colors"
-                title="Customize Tags & Settings"
+                className="p-2 hover:bg-gray-100 rounded-md transition-colors"
+                title="Settings"
               >
                 <Settings size={18} className="text-gray-600" />
               </button>
-              <div className="hidden md:flex items-center gap-3 bg-white/70 px-3 py-2 rounded-xl shadow-sm">
-                <img src={user.photoURL} alt={user.displayName} className="w-8 h-8 rounded-full border-2 border-orange-200" />
-                <span className="text-sm font-medium text-gray-700">{user.displayName}</span>
+              <div className="hidden md:flex items-center gap-3 pl-3 border-l border-gray-200">
+                <img src={user.photoURL} alt={user.displayName} className="w-7 h-7 rounded-full" />
+                <span className="text-sm text-gray-700">{user.displayName}</span>
               </div>
               <button
                 onClick={handleSignOut}
-                className="p-2 hover:bg-orange-100 rounded-xl transition-colors"
+                className="p-2 hover:bg-gray-100 rounded-md transition-colors"
                 title="Sign Out"
               >
                 <LogOut size={18} className="text-gray-600" />
@@ -697,140 +777,180 @@ function App() {
         </div>
       </header>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-8 space-y-4 sm:space-y-6">
+      <div className="max-w-7xl mx-auto px-6 py-6 space-y-6">
         {activeTab === 'kanban' && (
           <>
-            {/* Search Bar */}
-            <section className="space-y-2">
-              <div className="relative">
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search tasks... (Press / to search)"
-                  className="w-full bg-white/70 border-2 border-orange-200 rounded-2xl pl-12 pr-4 py-3 focus:outline-none focus:ring-2 focus:ring-orange-400 placeholder-gray-400 shadow-sm"
-                />
-                {searchQuery && (
-                  <button
-                    onClick={() => setSearchQuery('')}
-                    className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                  >
-                    <X size={20} />
-                  </button>
-                )}
-              </div>
-              <div className="flex items-center gap-4 text-xs text-gray-500">
-                <span>⌨️ Shortcuts:</span>
-                <span><kbd className="px-2 py-1 bg-white rounded-lg border border-orange-200 shadow-sm">/</kbd> Search</span>
-                <span><kbd className="px-2 py-1 bg-white rounded-lg border border-orange-200 shadow-sm">N</kbd> Quick capture</span>
-              </div>
-            </section>
+            {/* Search */}
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search tasks..."
+                className="w-full bg-white border border-gray-300 rounded-lg pl-10 pr-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent text-sm"
+              />
+            </div>
 
             {/* Daily Tasks */}
-            <section className="bg-gradient-to-r from-orange-100/70 to-amber-100/70 border-2 border-orange-300 rounded-2xl p-6 shadow-lg">
+            <div className="bg-white border border-gray-200 rounded-lg p-6">
               <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <Target className="text-orange-600" size={24} />
-                  <h2 className="text-xl font-bold text-gray-800">☀️ Today's Tasks</h2>
-                </div>
+                <h2 className="text-lg font-semibold text-gray-900">Today's Tasks</h2>
                 <button
                   onClick={handleAddToBoard}
-                  className="px-4 py-2 bg-gradient-to-r from-green-400 to-emerald-400 hover:from-green-500 hover:to-emerald-500 text-white rounded-xl font-semibold transition-all transform hover:scale-105 shadow-md flex items-center gap-2"
+                  className="px-4 py-2 bg-gray-900 text-white rounded-md text-sm font-medium hover:bg-gray-800 transition-colors flex items-center gap-2"
                 >
-                  <Plus size={18} />
+                  <Plus size={16} />
                   Add to Board
                 </button>
               </div>
 
-              {/* Top 3 Priorities */}
-              <div className="mb-4">
-                <h3 className="text-sm font-semibold text-orange-700 mb-2 uppercase tracking-wide">🔥 Top 3 Priorities</h3>
-                <div className="grid gap-2">
-                  {ruleOfThree.map((rule, index) => (
-                    <div key={index} className="flex items-center gap-3">
-                      <span className="text-2xl font-bold text-orange-600 w-8">{index + 1}.</span>
+              <div className="grid md:grid-cols-2 gap-6">
+                <div>
+                  <h3 className="text-xs font-semibold text-gray-500 uppercase mb-3">Top Priorities</h3>
+                  <div className="space-y-2">
+                    {ruleOfThree.map((rule, index) => (
                       <input
+                        key={index}
                         type="text"
                         value={rule}
                         onChange={(e) => handleRuleChange(index, e.target.value)}
-                        placeholder={`Priority task #${index + 1}`}
-                        className="flex-1 bg-white/80 border-2 border-orange-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-orange-400 placeholder-gray-400 shadow-sm"
+                        placeholder={`Priority ${index + 1}`}
+                        className="w-full bg-gray-50 border border-gray-200 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent text-sm"
                       />
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
-              </div>
-
-              {/* Non-Priority Tasks */}
-              <div>
-                <h3 className="text-sm font-semibold text-gray-600 mb-2 uppercase tracking-wide">📝 Additional Tasks</h3>
-                <div className="grid gap-2">
-                  {nonPriorityTasks.map((task, index) => (
-                    <div key={index} className="flex items-center gap-3">
-                      <span className="text-xl text-gray-500 w-8">•</span>
+                <div>
+                  <h3 className="text-xs font-semibold text-gray-500 uppercase mb-3">Additional Tasks</h3>
+                  <div className="space-y-2">
+                    {nonPriorityTasks.map((task, index) => (
                       <input
+                        key={index}
                         type="text"
                         value={task}
                         onChange={(e) => handleNonPriorityChange(index, e.target.value)}
-                        placeholder={`Additional task #${index + 1}`}
-                        className="flex-1 bg-white/60 border-2 border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-gray-400 placeholder-gray-400 shadow-sm"
+                        placeholder={`Task ${index + 1}`}
+                        className="w-full bg-gray-50 border border-gray-200 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent text-sm"
                       />
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
               </div>
-
-              <div className="mt-4 text-xs text-gray-600 bg-white/50 rounded-lg p-3">
-                💡 <strong>Tip:</strong> Focus on your top 3 priorities first! Additional tasks are low priority.
-              </div>
-            </section>
+            </div>
 
             {/* Quick Capture */}
-            <section className="bg-white/70 border-2 border-orange-200 rounded-2xl p-6 shadow-lg">
-              <div className="flex items-center gap-2 mb-4">
-                <Plus className="text-orange-500" size={24} />
-                <h2 className="text-xl font-bold text-gray-800">💡 Quick Capture</h2>
-              </div>
+            <div className="bg-white border border-gray-200 rounded-lg p-4">
               <div className="flex gap-3">
                 <input
                   type="text"
                   value={quickCapture}
                   onChange={(e) => setQuickCapture(e.target.value)}
                   onKeyPress={(e) => e.key === 'Enter' && handleQuickCapture()}
-                  placeholder="Capture an idea before it flies away..."
-                  className="flex-1 bg-white border-2 border-orange-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-orange-400 placeholder-gray-400 shadow-sm"
+                  placeholder="Quick capture..."
+                  className="flex-1 bg-gray-50 border border-gray-200 rounded-md px-4 py-2 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent text-sm"
                 />
                 <button
                   onClick={handleQuickCapture}
-                  className="px-6 py-3 bg-gradient-to-r from-orange-400 to-amber-400 hover:from-orange-500 hover:to-amber-500 text-white rounded-xl font-semibold transition-all transform hover:scale-105 shadow-md"
+                  className="px-5 py-2 bg-gray-900 text-white rounded-md text-sm font-medium hover:bg-gray-800 transition-colors"
                 >
-                  Capture
+                  Add
                 </button>
               </div>
-            </section>
+            </div>
 
             {/* Hub Filter */}
-            <section className="flex items-center gap-2 sm:gap-4 overflow-x-auto pb-2">
-              <span className="text-sm font-semibold text-gray-600 flex-shrink-0">FILTER:</span>
-              {HUBS.map((hub) => {
-                const Icon = hub.icon;
-                return (
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-medium text-gray-500">FILTER:</span>
+              {userHubs.map((hub) => (
+                <button
+                  key={hub.id}
+                  onClick={() => setSelectedHub(hub.id)}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                    selectedHub === hub.id
+                      ? 'bg-gray-900 text-white'
+                      : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  {hub.label}
+                </button>
+              ))}
+              <button
+                onClick={() => setShowHubManager(!showHubManager)}
+                className="p-1.5 hover:bg-gray-100 rounded-md transition-colors"
+                title="Manage Categories"
+              >
+                <Settings size={14} className="text-gray-500" />
+              </button>
+            </div>
+
+            {/* Hub Manager */}
+            {showHubManager && (
+              <div className="bg-white border border-gray-200 rounded-lg p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-semibold text-gray-900">Manage Categories</h3>
                   <button
-                    key={hub.id}
-                    onClick={() => setSelectedHub(hub.id)}
-                    className={`px-4 py-2 rounded-xl font-semibold transition-all flex items-center gap-2 flex-shrink-0 text-sm shadow-sm ${
-                      selectedHub === hub.id
-                        ? 'bg-white ring-2 ring-orange-400 text-orange-600'
-                        : 'bg-white/70 hover:bg-white text-gray-600'
-                    }`}
+                    onClick={() => setShowHubManager(false)}
+                    className="p-1 hover:bg-gray-100 rounded"
                   >
-                    <Icon className={hub.color} size={16} />
-                    <span>{hub.label}</span>
+                    <X size={16} />
                   </button>
-                );
-              })}
-            </section>
+                </div>
+                <div className="space-y-3">
+                  {userHubs.filter(h => h.id !== 'all').map(hub => (
+                    <div key={hub.id} className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg">
+                      {editingHub === hub.id ? (
+                        <>
+                          <input
+                            type="text"
+                            value={hub.label}
+                            onChange={(e) => updateHub(hub.id, 'label', e.target.value)}
+                            className="flex-1 bg-gray-50 border border-gray-300 rounded px-2 py-1 text-sm"
+                            autoFocus
+                          />
+                          <input
+                            type="color"
+                            value={hub.color}
+                            onChange={(e) => updateHub(hub.id, 'color', e.target.value)}
+                            className="w-10 h-8 rounded cursor-pointer"
+                          />
+                          <button
+                            onClick={() => setEditingHub(null)}
+                            className="p-1 hover:bg-gray-100 rounded"
+                          >
+                            <Check size={16} />
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <div className="w-4 h-4 rounded" style={{ backgroundColor: hub.color }}></div>
+                          <span className="flex-1 text-sm font-medium">{hub.label}</span>
+                          <button
+                            onClick={() => setEditingHub(hub.id)}
+                            className="p-1 hover:bg-gray-100 rounded"
+                          >
+                            <Edit size={14} />
+                          </button>
+                          <button
+                            onClick={() => deleteHub(hub.id)}
+                            className="p-1 hover:bg-red-50 text-red-600 rounded"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                  <button
+                    onClick={addHub}
+                    className="w-full px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors"
+                  >
+                    <Plus size={16} className="inline mr-2" />
+                    Add Category
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Kanban Board */}
             <DragDropContext onDragEnd={handleDragEnd}>
@@ -841,12 +961,12 @@ function App() {
                       <div
                         ref={provided.innerRef}
                         {...provided.droppableProps}
-                        className={`${column.color} border-2 rounded-2xl p-4 min-h-[500px] shadow-lg transition-all ${
-                          snapshot.isDraggingOver ? 'ring-2 ring-orange-400 scale-[1.02]' : ''
+                        className={`bg-gray-100 rounded-lg p-4 min-h-[500px] border-l-4 ${column.color} ${
+                          snapshot.isDraggingOver ? 'bg-gray-200' : ''
                         }`}
                       >
-                        <h3 className="font-bold text-lg mb-4 text-gray-800">{column.title}</h3>
-                        <div className="space-y-3">
+                        <h3 className="font-semibold text-sm text-gray-700 mb-3">{column.title}</h3>
+                        <div className="space-y-2">
                           {filterCardsByHub(cards[column.id]).map((card, index) => (
                             <Draggable key={card.id} draggableId={card.id} index={index}>
                               {(provided, snapshot) => (
@@ -854,11 +974,10 @@ function App() {
                                   ref={provided.innerRef}
                                   {...provided.draggableProps}
                                   {...provided.dragHandleProps}
-                                  className={`bg-white border-2 border-orange-200 rounded-xl p-4 space-y-3 hover:border-orange-400 transition-all shadow-md ${
-                                    snapshot.isDragging ? 'shadow-2xl ring-2 ring-orange-500 rotate-2 scale-105' : ''
-                                  } ${expandedCard === card.id ? 'ring-2 ring-orange-400' : ''}`}
+                                  className={`bg-white border border-gray-200 rounded-lg p-3 space-y-2 hover:shadow-md transition-shadow ${
+                                    snapshot.isDragging ? 'shadow-lg' : ''
+                                  }`}
                                 >
-                                  {/* Header: Title & Actions */}
                                   <div className="flex items-start justify-between gap-2">
                                     {editingCard === card.id ? (
                                       <input
@@ -868,118 +987,107 @@ function App() {
                                         onBlur={() => setEditingCard(null)}
                                         onKeyPress={(e) => e.key === 'Enter' && setEditingCard(null)}
                                         autoFocus
-                                        className="flex-1 bg-orange-50 border-2 border-orange-300 rounded-lg px-2 py-1 text-sm font-medium focus:outline-none"
+                                        className="flex-1 bg-gray-50 border border-gray-300 rounded px-2 py-1 text-sm"
                                       />
                                     ) : (
                                       <p
                                         onClick={() => setEditingCard(card.id)}
-                                        className="text-sm font-medium flex-1 cursor-pointer hover:text-orange-600 transition-colors text-gray-800"
+                                        className="text-sm flex-1 cursor-pointer hover:text-gray-600"
                                       >
                                         {card.title}
                                       </p>
                                     )}
-                                    <div className="flex items-center gap-1">
+                                    <div className="relative">
                                       <button
-                                        onClick={() => toggleCardExpansion(card.id)}
-                                        className="text-gray-400 hover:text-orange-600 transition-colors"
-                                        title="Expand details"
+                                        onClick={() => setShowCardMenu(showCardMenu === card.id ? null : card.id)}
+                                        className="text-gray-400 hover:text-gray-600"
                                       >
-                                        <FileText size={16} />
+                                        <MoreVertical size={14} />
                                       </button>
-                                      <div className="relative">
-                                        <button
-                                          onClick={() => setShowCardMenu(showCardMenu === card.id ? null : card.id)}
-                                          className="text-gray-400 hover:text-gray-600 transition-colors"
-                                        >
-                                          <MoreVertical size={16} />
-                                        </button>
-                                        {showCardMenu === card.id && (
-                                          <div className="absolute right-0 top-6 bg-white border-2 border-orange-200 rounded-xl shadow-xl z-10 min-w-[150px] overflow-hidden">
-                                            <button
-                                              onClick={() => duplicateCard(column.id, card)}
-                                              className="w-full px-4 py-2 text-left text-sm hover:bg-orange-50 flex items-center gap-2 transition-colors"
-                                            >
-                                              <Copy size={14} />
-                                              Duplicate
-                                            </button>
-                                            <button
-                                              onClick={() => {
-                                                handleDeleteCard(column.id, card.id);
-                                                setShowCardMenu(null);
-                                              }}
-                                              className="w-full px-4 py-2 text-left text-sm hover:bg-red-50 text-red-600 flex items-center gap-2 transition-colors"
-                                            >
-                                              <Trash2 size={14} />
-                                              Delete
-                                            </button>
-                                          </div>
-                                        )}
-                                      </div>
+                                      {showCardMenu === card.id && (
+                                        <div className="absolute right-0 top-6 bg-white border border-gray-200 rounded-lg shadow-lg z-10 min-w-[140px]">
+                                          <button
+                                            onClick={() => {
+                                              duplicateCard(column.id, card);
+                                              setShowCardMenu(null);
+                                            }}
+                                            className="w-full px-3 py-2 text-left text-xs hover:bg-gray-50"
+                                          >
+                                            <Copy size={12} className="inline mr-2" />
+                                            Duplicate
+                                          </button>
+                                          <button
+                                            onClick={() => {
+                                              toggleCardExpansion(card.id);
+                                              setShowCardMenu(null);
+                                            }}
+                                            className="w-full px-3 py-2 text-left text-xs hover:bg-gray-50"
+                                          >
+                                            <FileText size={12} className="inline mr-2" />
+                                            Details
+                                          </button>
+                                          <button
+                                            onClick={() => {
+                                              handleDeleteCard(column.id, card.id);
+                                              setShowCardMenu(null);
+                                            }}
+                                            className="w-full px-3 py-2 text-left text-xs hover:bg-red-50 text-red-600"
+                                          >
+                                            <Trash2 size={12} className="inline mr-2" />
+                                            Delete
+                                          </button>
+                                        </div>
+                                      )}
                                     </div>
                                   </div>
 
-                                  {/* Priority */}
+                                  {expandedCard === card.id && (
+                                    <textarea
+                                      value={card.description || ''}
+                                      onChange={(e) => updateCardField(column.id, card.id, 'description', e.target.value)}
+                                      placeholder="Add description..."
+                                      className="w-full bg-gray-50 border border-gray-200 rounded px-2 py-1.5 text-xs min-h-[60px] focus:outline-none focus:ring-1 focus:ring-gray-900"
+                                    />
+                                  )}
+
                                   <div className="flex items-center gap-2">
                                     <select
                                       value={card.priority || 'medium'}
                                       onChange={(e) => updateCardField(column.id, card.id, 'priority', e.target.value)}
-                                      className={`text-xs px-2 py-1 rounded-lg border-2 focus:outline-none focus:ring-2 focus:ring-orange-400 ${
+                                      className={`text-xs px-2 py-1 rounded border-0 focus:outline-none ${
                                         card.priority === 'high'
-                                          ? 'bg-red-100 text-red-700 border-red-300'
+                                          ? 'bg-red-100 text-red-700'
                                           : card.priority === 'low'
-                                          ? 'bg-gray-100 text-gray-700 border-gray-300'
-                                          : 'bg-yellow-100 text-yellow-700 border-yellow-300'
+                                          ? 'bg-gray-100 text-gray-600'
+                                          : 'bg-yellow-100 text-yellow-700'
                                       }`}
                                     >
-                                      <option value="high">🔴 High</option>
-                                      <option value="medium">🟡 Medium</option>
-                                      <option value="low">⚪ Low</option>
+                                      <option value="high">High</option>
+                                      <option value="medium">Medium</option>
+                                      <option value="low">Low</option>
                                     </select>
-                                  </div>
-
-                                  {/* Due Date */}
-                                  <div className="flex items-center gap-2">
-                                    <Clock size={14} className="text-gray-500" />
                                     <input
                                       type="date"
                                       value={card.dueDate || ''}
                                       onChange={(e) => updateCardField(column.id, card.id, 'dueDate', e.target.value)}
-                                      className="text-xs bg-white border-2 border-orange-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-orange-400 text-gray-700"
+                                      className="text-xs bg-gray-50 border border-gray-200 rounded px-2 py-1 focus:outline-none"
                                     />
                                   </div>
 
-                                  {/* Expanded Description */}
-                                  {expandedCard === card.id && (
-                                    <div className="space-y-2 pt-2 border-t-2 border-orange-100">
-                                      <textarea
-                                        value={card.description || ''}
-                                        onChange={(e) => updateCardField(column.id, card.id, 'description', e.target.value)}
-                                        placeholder="Add notes, links, details..."
-                                        className="w-full bg-orange-50/50 border-2 border-orange-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 placeholder-gray-400 min-h-[80px]"
-                                      />
-                                    </div>
-                                  )}
-
-                                  {/* Role Tags */}
-                                  <div className="flex flex-wrap gap-1.5">
+                                  <div className="flex flex-wrap gap-1">
                                     {userRoles.map((role) => (
                                       <button
                                         key={role.id}
                                         onClick={() => toggleRole(column.id, card.id, role.id)}
-                                        className={`px-2 py-1 rounded-lg text-xs font-semibold transition-all shadow-sm ${
+                                        className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${
                                           card.roles.includes(role.id)
                                             ? `${role.color} text-white`
-                                            : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
+                                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                                         }`}
                                       >
                                         {role.label}
                                       </button>
                                     ))}
-                                  </div>
-
-                                  {/* Card Meta */}
-                                  <div className="text-xs text-gray-500 pt-1 border-t border-orange-100">
-                                    {new Date(card.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                                   </div>
                                 </div>
                               )}
@@ -997,49 +1105,221 @@ function App() {
         )}
 
         {activeTab === 'calendar' && (
-          <div className="bg-white/70 border-2 border-orange-200 rounded-2xl p-8 shadow-lg min-h-[600px]">
-            <div className="text-center space-y-6">
-              <CalendarIcon className="mx-auto text-orange-500" size={80} />
-              <div>
-                <h2 className="text-3xl font-bold gradient-summer mb-2">Calendar View</h2>
-                <p className="text-gray-600 text-lg">
-                  Your synced events and tasks will appear here
-                </p>
+          <div className="bg-white border border-gray-200 rounded-lg p-6">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-semibold text-gray-900">{formatMonthYear(currentDate)}</h2>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1))}
+                  className="p-2 hover:bg-gray-100 rounded transition-colors"
+                >
+                  <ChevronLeft size={20} />
+                </button>
+                <button
+                  onClick={() => setCurrentDate(new Date())}
+                  className="px-3 py-1.5 text-sm font-medium hover:bg-gray-100 rounded transition-colors"
+                >
+                  Today
+                </button>
+                <button
+                  onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1))}
+                  className="p-2 hover:bg-gray-100 rounded transition-colors"
+                >
+                  <ChevronRight size={20} />
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-7 gap-2">
+              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
+                <div key={day} className="text-center text-xs font-semibold text-gray-500 py-2">
+                  {day}
+                </div>
+              ))}
+              {getDaysInMonth(currentDate).map((date, index) => {
+                const tasksForDay = date ? getTasksForDate(date) : [];
+                const isToday = date && isSameDay(date, new Date());
+                const isSelected = date && selectedDate && isSameDay(date, selectedDate);
+
+                return (
+                  <div
+                    key={index}
+                    onClick={() => date && setSelectedDate(date)}
+                    className={`min-h-[100px] border border-gray-200 rounded-lg p-2 cursor-pointer transition-colors ${
+                      !date ? 'bg-gray-50' : isSelected ? 'bg-blue-50 border-blue-300' : isToday ? 'bg-gray-100' : 'hover:bg-gray-50'
+                    }`}
+                  >
+                    {date && (
+                      <>
+                        <div className={`text-sm font-medium mb-1 ${isToday ? 'text-blue-600' : 'text-gray-700'}`}>
+                          {date.getDate()}
+                        </div>
+                        <div className="space-y-1">
+                          {tasksForDay.slice(0, 3).map(task => (
+                            <div key={task.id} className="text-xs bg-gray-200 rounded px-1.5 py-0.5 truncate">
+                              {task.title}
+                            </div>
+                          ))}
+                          {tasksForDay.length > 3 && (
+                            <div className="text-xs text-gray-500">+{tasksForDay.length - 3} more</div>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {selectedDate && (
+              <div className="mt-6 p-4 bg-gray-50 rounded-lg">
+                <h3 className="text-sm font-semibold text-gray-900 mb-3">
+                  Tasks for {selectedDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}
+                </h3>
+                <div className="space-y-2">
+                  {getTasksForDate(selectedDate).length > 0 ? (
+                    getTasksForDate(selectedDate).map(task => (
+                      <div key={task.id} className="bg-white border border-gray-200 rounded p-3">
+                        <div className="font-medium text-sm">{task.title}</div>
+                        {task.description && (
+                          <div className="text-xs text-gray-600 mt-1">{task.description}</div>
+                        )}
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-sm text-gray-500">No tasks scheduled for this day</div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'analytics' && (
+          <div className="space-y-6">
+            <div className="bg-white border border-gray-200 rounded-lg p-6">
+              <h2 className="text-xl font-semibold text-gray-900 mb-6">Task Analytics</h2>
+
+              <div className="grid md:grid-cols-3 gap-6 mb-8">
+                <div className="text-center p-4 bg-gray-50 rounded-lg">
+                  <div className="text-3xl font-bold text-gray-900">{stats.totalTasks}</div>
+                  <div className="text-sm text-gray-600 mt-1">Total Tasks</div>
+                </div>
+                <div className="text-center p-4 bg-blue-50 rounded-lg">
+                  <div className="text-3xl font-bold text-blue-600">{stats.tasksByStatus['In Progress']}</div>
+                  <div className="text-sm text-gray-600 mt-1">In Progress</div>
+                </div>
+                <div className="text-center p-4 bg-green-50 rounded-lg">
+                  <div className="text-3xl font-bold text-green-600">{stats.tasksByStatus.Done}</div>
+                  <div className="text-sm text-gray-600 mt-1">Completed</div>
+                </div>
               </div>
 
-              {calendarEvents.length > 0 ? (
-                <div className="grid gap-4 mt-8">
-                  {calendarEvents.slice(0, 10).map((event, index) => (
-                    <div
-                      key={index}
-                      className="bg-gradient-to-r from-orange-100/50 to-amber-100/50 border-2 border-orange-200 rounded-xl p-4 text-left"
-                    >
-                      <h3 className="font-semibold text-gray-800">{event.summary || 'Untitled Event'}</h3>
-                      <p className="text-sm text-gray-600 mt-1">
-                        {event.start?.dateTime
-                          ? new Date(event.start.dateTime).toLocaleString('en-US', {
-                              weekday: 'short',
-                              month: 'short',
-                              day: 'numeric',
-                              hour: 'numeric',
-                              minute: '2-digit',
-                            })
-                          : 'All day'}
-                      </p>
+              <div className="grid md:grid-cols-2 gap-6">
+                {/* Tasks by Category */}
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
+                    <PieChart size={18} />
+                    Tasks by Category
+                  </h3>
+                  <div className="space-y-3">
+                    {Object.entries(stats.tasksByHub).map(([hub, count]) => {
+                      const percentage = stats.totalTasks > 0 ? (count / stats.totalTasks * 100).toFixed(1) : 0;
+                      const hubData = userHubs.find(h => h.label === hub);
+                      return (
+                        <div key={hub}>
+                          <div className="flex items-center justify-between text-sm mb-1">
+                            <div className="flex items-center gap-2">
+                              <div
+                                className="w-3 h-3 rounded"
+                                style={{ backgroundColor: hubData?.color || '#6B7280' }}
+                              ></div>
+                              <span className="font-medium">{hub}</span>
+                            </div>
+                            <span className="text-gray-600">{count} ({percentage}%)</span>
+                          </div>
+                          <div className="w-full bg-gray-200 rounded-full h-2">
+                            <div
+                              className="h-2 rounded-full transition-all duration-500"
+                              style={{
+                                width: `${percentage}%`,
+                                backgroundColor: hubData?.color || '#6B7280'
+                              }}
+                            ></div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Tasks by Priority */}
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
+                    <TrendingUp size={18} />
+                    Tasks by Priority
+                  </h3>
+                  <div className="space-y-3">
+                    {Object.entries(stats.tasksByPriority).map(([priority, count]) => {
+                      const percentage = stats.totalTasks > 0 ? (count / stats.totalTasks * 100).toFixed(1) : 0;
+                      const color = priority === 'High' ? '#EF4444' : priority === 'Medium' ? '#F59E0B' : '#6B7280';
+                      return (
+                        <div key={priority}>
+                          <div className="flex items-center justify-between text-sm mb-1">
+                            <div className="flex items-center gap-2">
+                              <div className="w-3 h-3 rounded" style={{ backgroundColor: color }}></div>
+                              <span className="font-medium">{priority}</span>
+                            </div>
+                            <span className="text-gray-600">{count} ({percentage}%)</span>
+                          </div>
+                          <div className="w-full bg-gray-200 rounded-full h-2">
+                            <div
+                              className="h-2 rounded-full transition-all duration-500"
+                              style={{ width: `${percentage}%`, backgroundColor: color }}
+                            ></div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Status Distribution */}
+            <div className="bg-white border border-gray-200 rounded-lg p-6">
+              <h3 className="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
+                <BarChart3 size={18} />
+                Status Distribution
+              </h3>
+              <div className="grid grid-cols-4 gap-4">
+                {Object.entries(stats.tasksByStatus).map(([status, count]) => {
+                  const maxCount = Math.max(...Object.values(stats.tasksByStatus));
+                  const height = maxCount > 0 ? (count / maxCount * 100) : 0;
+                  const colors = {
+                    'Ideas': '#9CA3AF',
+                    'In Progress': '#3B82F6',
+                    'Ready': '#10B981',
+                    'Done': '#6B7280'
+                  };
+                  return (
+                    <div key={status} className="text-center">
+                      <div className="h-40 flex items-end justify-center mb-2">
+                        <div
+                          className="w-full rounded-t transition-all duration-500"
+                          style={{
+                            height: `${height}%`,
+                            backgroundColor: colors[status],
+                            minHeight: count > 0 ? '20px' : '0'
+                          }}
+                        ></div>
+                      </div>
+                      <div className="text-2xl font-bold text-gray-900">{count}</div>
+                      <div className="text-xs text-gray-600 mt-1">{status}</div>
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="mt-8">
-                  <p className="text-gray-500 mb-4">No calendar events synced yet</p>
-                  <button
-                    onClick={handleSyncToCalendar}
-                    className="px-6 py-3 bg-gradient-to-r from-orange-400 to-amber-400 hover:from-orange-500 hover:to-amber-500 text-white rounded-xl font-semibold transition-all transform hover:scale-105 shadow-md mx-auto"
-                  >
-                    Sync Tasks to Calendar
-                  </button>
-                </div>
-              )}
+                  );
+                })}
+              </div>
             </div>
           </div>
         )}
