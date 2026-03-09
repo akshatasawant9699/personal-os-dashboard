@@ -1,5 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
+import { getFirestore, doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 
 // Firebase configuration
 const firebaseConfig = {
@@ -14,6 +15,7 @@ const firebaseConfig = {
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
+export const db = getFirestore(app);
 export const googleProvider = new GoogleAuthProvider();
 
 // Add Google Calendar scope
@@ -47,6 +49,38 @@ export const signOutUser = async () => {
     localStorage.removeItem('google_access_token');
   } catch (error) {
     console.error('Error signing out:', error);
+    throw error;
+  }
+};
+
+// Firestore helper functions for multi-user support
+export const getUserData = async (userId) => {
+  try {
+    const userDoc = await getDoc(doc(db, 'users', userId));
+    if (userDoc.exists()) {
+      return userDoc.data();
+    }
+    return null;
+  } catch (error) {
+    console.error('Error getting user data:', error);
+    throw error;
+  }
+};
+
+export const saveUserData = async (userId, data) => {
+  try {
+    await setDoc(doc(db, 'users', userId), data, { merge: true });
+  } catch (error) {
+    console.error('Error saving user data:', error);
+    throw error;
+  }
+};
+
+export const updateUserData = async (userId, updates) => {
+  try {
+    await updateDoc(doc(db, 'users', userId), updates);
+  } catch (error) {
+    console.error('Error updating user data:', error);
     throw error;
   }
 };

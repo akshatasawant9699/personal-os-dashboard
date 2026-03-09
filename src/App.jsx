@@ -3,57 +3,62 @@ import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import {
   Target,
   Plus,
-  Filter,
   LogOut,
-  Calendar,
+  Calendar as CalendarIcon,
   Trash2,
   Edit2,
-  Check,
   X,
   Sparkles,
-  Brain,
-  Briefcase,
-  Plane,
   User,
   MoreVertical,
   Copy,
   Clock,
-  AlertCircle,
   Search,
-  Save,
   FileText,
+  Sun,
+  Palmtree,
+  LayoutGrid,
+  Home,
+  Check,
 } from 'lucide-react';
-import { auth, signInWithGoogle, signOutUser } from './firebase';
+import { auth, signInWithGoogle, signOutUser, getUserData, saveUserData } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { getCalendarEvents, syncTasksToCalendar } from './utils/calendar';
 
-const ROLES = [
-  { id: 'salesforce', label: 'Salesforce Dev Advocate', color: 'bg-blue-500', hub: 'tech' },
-  { id: 'youtube-tech', label: 'Tech/AI YouTuber', color: 'bg-red-500', hub: 'tech' },
-  { id: 'pm-shadow', label: 'Product Manager Shadow', color: 'bg-purple-500', hub: 'career' },
-  { id: 'travel-creator', label: 'Travel Creator', color: 'bg-green-500', hub: 'travel' },
-  { id: 'linkedin', label: 'LinkedIn Creator', color: 'bg-indigo-500', hub: 'career' },
-  { id: 'devrel', label: 'DevRel Consultant', color: 'bg-yellow-500', hub: 'career' },
-  { id: 'ai-research', label: 'AI Research Member', color: 'bg-pink-500', hub: 'tech' },
+const DEFAULT_ROLES = [
+  { id: 'work', label: 'Work', color: 'bg-blue-400', hub: 'career' },
+  { id: 'personal', label: 'Personal', color: 'bg-green-400', hub: 'personal' },
+  { id: 'learning', label: 'Learning', color: 'bg-purple-400', hub: 'growth' },
 ];
 
 const HUBS = [
-  { id: 'all', label: 'All Tasks', icon: Sparkles, color: 'text-gray-400' },
-  { id: 'tech', label: 'Hub A: Tech/AI', icon: Brain, color: 'text-hub-tech' },
-  { id: 'career', label: 'Hub B: Career', icon: Briefcase, color: 'text-hub-career' },
-  { id: 'travel', label: 'Hub C: Travel', icon: Plane, color: 'text-hub-travel' },
+  { id: 'all', label: 'All Tasks', icon: Sparkles, color: 'text-orange-500' },
+  { id: 'career', label: '💼 Career', icon: Home, color: 'text-blue-500' },
+  { id: 'personal', label: '🌴 Personal', icon: Palmtree, color: 'text-green-500' },
+  { id: 'growth', label: '🌱 Growth', icon: Sun, color: 'text-purple-500' },
 ];
 
 const COLUMNS = {
-  ideas: { id: 'ideas', title: 'Idea Box', color: 'border-gray-700' },
-  inProgress: { id: 'inProgress', title: 'In Progress', color: 'border-yellow-600' },
-  readyToPublish: { id: 'readyToPublish', title: 'Ready to Publish', color: 'border-green-600' },
-  done: { id: 'done', title: 'Done', color: 'border-gray-800' },
+  ideas: { id: 'ideas', title: '💡 Ideas', color: 'border-amber-300 bg-amber-50/50' },
+  inProgress: { id: 'inProgress', title: '🚀 In Progress', color: 'border-orange-300 bg-orange-50/50' },
+  readyToPublish: { id: 'readyToPublish', title: '✨ Ready', color: 'border-green-300 bg-green-50/50' },
+  done: { id: 'done', title: '✅ Done', color: 'border-gray-300 bg-gray-50/50' },
 };
 
 function App() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [onboardingStep, setOnboardingStep] = useState(0);
+  const [activeTab, setActiveTab] = useState('kanban'); // 'kanban' or 'calendar'
+
+  // User settings
+  const [userRoles, setUserRoles] = useState(DEFAULT_ROLES);
+  const [areasOfFocus, setAreasOfFocus] = useState('');
+  const [purposeOfUse, setPurposeOfUse] = useState('');
+  const [customTags, setCustomTags] = useState(['']);
+
+  // App state
   const [ruleOfThree, setRuleOfThree] = useState(['', '', '']);
   const [quickCapture, setQuickCapture] = useState('');
   const [selectedHub, setSelectedHub] = useState('all');
@@ -71,12 +76,12 @@ function App() {
 
   // Authentication listener
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
       setLoading(false);
 
       if (currentUser) {
-        loadUserData(currentUser.uid);
+        await loadUserDataFromFirestore(currentUser.uid);
         loadCalendarEvents();
       }
     });
@@ -84,49 +89,74 @@ function App() {
     return () => unsubscribe();
   }, []);
 
-  // Load user data from localStorage
-  const loadUserData = (userId) => {
-    const savedData = localStorage.getItem(`personal-os-${userId}`);
-    if (savedData) {
-      const parsed = JSON.parse(savedData);
-      setRuleOfThree(parsed.ruleOfThree || ['', '', '']);
-      setCards(parsed.cards || { ideas: [], inProgress: [], readyToPublish: [], done: [] });
+  // Load user data from Firestore
+  const loadUserDataFromFirestore = async (userId) => {
+    try {
+      const userData = await getUserData(userId);
+
+      if (userData) {
+        // Existing user
+        setRuleOfThree(userData.ruleOfThree || ['', '', '']);
+        setCards(userData.cards || { ideas: [], inProgress: [], readyToPublish: [], done: [] });
+        setUserRoles(userData.customRoles || DEFAULT_ROLES);
+        setAreasOfFocus(userData.areasOfFocus || '');
+        setPurposeOfUse(userData.purposeOfUse || '');
+        setShowOnboarding(false);
+      } else {
+        // New user - show onboarding
+        setShowOnboarding(true);
+      }
+    } catch (error) {
+      console.error('Error loading user data:', error);
     }
   };
 
-  // Save user data to localStorage
-  const saveUserData = (userId, data) => {
-    localStorage.setItem(`personal-os-${userId}`, JSON.stringify(data));
+  // Save user data to Firestore
+  const saveUserDataToFirestore = async () => {
+    if (!user) return;
+
+    try {
+      await saveUserData(user.uid, {
+        ruleOfThree,
+        cards,
+        customRoles: userRoles,
+        areasOfFocus,
+        purposeOfUse,
+        lastUpdated: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error('Error saving user data:', error);
+    }
   };
 
   // Auto-save on data change
   useEffect(() => {
-    if (user) {
-      saveUserData(user.uid, { ruleOfThree, cards });
+    if (user && !showOnboarding) {
+      const timer = setTimeout(() => {
+        saveUserDataToFirestore();
+      }, 1000); // Debounce saves
+
+      return () => clearTimeout(timer);
     }
-  }, [ruleOfThree, cards, user]);
+  }, [ruleOfThree, cards, user, showOnboarding]);
 
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyPress = (e) => {
-      // Ignore if user is typing in an input/textarea
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
         return;
       }
 
-      // "/" - Focus search
       if (e.key === '/') {
         e.preventDefault();
         document.querySelector('input[placeholder*="Search"]')?.focus();
       }
 
-      // "n" - Focus quick capture
       if (e.key === 'n') {
         e.preventDefault();
-        document.querySelector('input[placeholder*="Quickly jot"]')?.focus();
+        document.querySelector('input[placeholder*="Quickly"]')?.focus();
       }
 
-      // "Escape" - Clear search and close menus
       if (e.key === 'Escape') {
         setSearchQuery('');
         setShowCardMenu(null);
@@ -152,6 +182,38 @@ function App() {
     }
   };
 
+  // Handle onboarding completion
+  const completeOnboarding = async () => {
+    // Convert custom tags to roles
+    const newRoles = customTags
+      .filter(tag => tag.trim() !== '')
+      .slice(0, 10)
+      .map((tag, index) => ({
+        id: `custom-${index}`,
+        label: tag.trim(),
+        color: [
+          'bg-rose-400', 'bg-pink-400', 'bg-fuchsia-400', 'bg-purple-400',
+          'bg-violet-400', 'bg-indigo-400', 'bg-blue-400', 'bg-cyan-400',
+          'bg-teal-400', 'bg-emerald-400'
+        ][index % 10],
+        hub: 'personal',
+      }));
+
+    setUserRoles([...DEFAULT_ROLES, ...newRoles]);
+
+    // Save to Firestore
+    await saveUserData(user.uid, {
+      customRoles: [...DEFAULT_ROLES, ...newRoles],
+      areasOfFocus,
+      purposeOfUse,
+      ruleOfThree: ['', '', ''],
+      cards: { ideas: [], inProgress: [], readyToPublish: [], done: [] },
+      lastUpdated: new Date().toISOString(),
+    });
+
+    setShowOnboarding(false);
+  };
+
   // Handle sign in
   const handleSignIn = async () => {
     try {
@@ -167,6 +229,7 @@ function App() {
       await signOutUser();
       setRuleOfThree(['', '', '']);
       setCards({ ideas: [], inProgress: [], readyToPublish: [], done: [] });
+      setUserRoles(DEFAULT_ROLES);
     } catch (error) {
       alert('Failed to sign out: ' + error.message);
     }
@@ -220,22 +283,6 @@ function App() {
       [source.droppableId]: sourceCards,
       [destination.droppableId]: destCards,
     });
-  };
-
-  // Add/Edit card
-  const handleSaveCard = (columnId, card) => {
-    if (editingCard) {
-      setCards((prev) => ({
-        ...prev,
-        [columnId]: prev[columnId].map((c) => (c.id === card.id ? card : c)),
-      }));
-    } else {
-      setCards((prev) => ({
-        ...prev,
-        [columnId]: [...prev[columnId], { ...card, id: Date.now().toString(), createdAt: new Date().toISOString() }],
-      }));
-    }
-    setEditingCard(null);
   };
 
   // Delete card
@@ -296,17 +343,15 @@ function App() {
   const filterCardsByHub = (cardList) => {
     let filtered = cardList;
 
-    // Filter by hub
     if (selectedHub !== 'all') {
       filtered = filtered.filter((card) =>
         card.roles.some((roleId) => {
-          const role = ROLES.find((r) => r.id === roleId);
+          const role = userRoles.find((r) => r.id === roleId);
           return role && role.hub === selectedHub;
         })
       );
     }
 
-    // Filter by search query
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
       filtered = filtered.filter(
@@ -329,7 +374,7 @@ function App() {
 
     const tasksToSync = cards.readyToPublish;
     if (tasksToSync.length === 0) {
-      alert('No tasks in "Ready to Publish" column to sync. Move some tasks there first!');
+      alert('No tasks in "Ready" column to sync!');
       return;
     }
 
@@ -337,356 +382,572 @@ function App() {
       const tasksData = tasksToSync.map((card) => ({
         id: card.id,
         title: card.title,
-        description: `Roles: ${card.roles.map((r) => ROLES.find((role) => role.id === r)?.label).join(', ')}`,
+        description: `Roles: ${card.roles.map((r) => userRoles.find((role) => role.id === r)?.label).join(', ')}`,
         startTime: new Date().toISOString(),
-        endTime: new Date(Date.now() + 60 * 60 * 1000).toISOString(), // 1 hour from now
+        endTime: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
       }));
 
       const result = await syncTasksToCalendar(accessToken, tasksData);
-
-      if (result.failedTasks && result.failedTasks.length > 0) {
-        alert(`Synced ${result.syncedTasks.length} tasks successfully. ${result.failedTasks.length} tasks failed. Please sign out and sign in again to refresh your access.`);
-      } else {
-        alert(`Successfully synced ${result.syncedTasks.length} tasks to Google Calendar!`);
-      }
-
+      alert(`Successfully synced ${result.syncedTasks.length} tasks!`);
       loadCalendarEvents();
     } catch (error) {
       console.error('Calendar sync error:', error);
-      if (error.message.includes('token') || error.message.includes('401') || error.message.includes('403')) {
-        alert('Your Google Calendar access has expired. Please sign out and sign in again to refresh access.');
-      } else {
-        alert('Failed to sync to calendar: ' + error.message);
-      }
+      alert('Failed to sync to calendar. Please try again.');
     }
+  };
+
+  // Add custom tag input
+  const addCustomTagInput = () => {
+    if (customTags.length < 10) {
+      setCustomTags([...customTags, '']);
+    }
+  };
+
+  // Update custom tag
+  const updateCustomTag = (index, value) => {
+    const newTags = [...customTags];
+    newTags[index] = value;
+    setCustomTags(newTags);
+  };
+
+  // Remove custom tag
+  const removeCustomTag = (index) => {
+    const newTags = customTags.filter((_, i) => i !== index);
+    setCustomTags(newTags.length > 0 ? newTags : ['']);
   };
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-xl">Loading...</div>
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-amber-50 via-orange-50 to-yellow-50">
+        <div className="text-xl text-gray-700 flex items-center gap-3">
+          <Sun className="animate-spin text-orange-500" size={32} />
+          Loading your workspace...
+        </div>
       </div>
     );
   }
 
   if (!user) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 via-gray-950 to-black">
-        <div className="text-center space-y-8 p-8">
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-amber-100 via-orange-100 to-yellow-100">
+        <div className="text-center space-y-8 p-8 bg-white/70 backdrop-blur-sm rounded-3xl shadow-2xl border-2 border-orange-200">
           <div className="space-y-4">
-            <h1 className="text-6xl font-bold bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">
+            <Sun className="mx-auto text-orange-500 animate-float" size={80} />
+            <h1 className="text-6xl font-bold gradient-summer">
               Personal OS
             </h1>
-            <p className="text-xl text-gray-400">Your Ultimate Productivity Dashboard</p>
+            <p className="text-2xl text-gray-700 font-light">Your Summer Productivity Hub ☀️🌴</p>
           </div>
           <button
             onClick={handleSignIn}
-            className="px-8 py-4 bg-white text-gray-900 rounded-lg font-semibold hover:bg-gray-100 transition-all transform hover:scale-105 flex items-center gap-3 mx-auto"
+            className="px-8 py-4 bg-gradient-to-r from-orange-400 to-amber-400 text-white rounded-2xl font-semibold hover:from-orange-500 hover:to-amber-500 transition-all transform hover:scale-105 flex items-center gap-3 mx-auto shadow-lg"
           >
             <User size={24} />
             Sign in with Google
           </button>
+          <p className="text-sm text-gray-600">✨ Join up to 100 users managing their productivity!</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Onboarding Flow
+  if (showOnboarding) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-amber-100 via-orange-100 to-yellow-100 p-4">
+        <div className="max-w-2xl w-full bg-white/90 backdrop-blur-sm rounded-3xl shadow-2xl p-8 border-2 border-orange-200">
+          <div className="text-center mb-8">
+            <Sun className="mx-auto text-orange-500 mb-4 animate-float" size={64} />
+            <h2 className="text-4xl font-bold gradient-summer mb-2">Welcome to Personal OS! 🎉</h2>
+            <p className="text-gray-600">Let's personalize your workspace</p>
+          </div>
+
+          {onboardingStep === 0 && (
+            <div className="space-y-6">
+              <div>
+                <label className="block text-lg font-semibold text-gray-700 mb-2">
+                  What are your main areas of focus?
+                </label>
+                <textarea
+                  value={areasOfFocus}
+                  onChange={(e) => setAreasOfFocus(e.target.value)}
+                  placeholder="E.g., Software development, content creation, fitness, learning..."
+                  className="w-full bg-white border-2 border-orange-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-orange-400 text-gray-800 placeholder-gray-400 min-h-[100px]"
+                />
+              </div>
+              <button
+                onClick={() => setOnboardingStep(1)}
+                className="w-full px-6 py-4 bg-gradient-to-r from-orange-400 to-amber-400 text-white rounded-xl font-semibold hover:from-orange-500 hover:to-amber-500 transition-all transform hover:scale-105"
+              >
+                Next →
+              </button>
+            </div>
+          )}
+
+          {onboardingStep === 1 && (
+            <div className="space-y-6">
+              <div>
+                <label className="block text-lg font-semibold text-gray-700 mb-2">
+                  What are you using this for?
+                </label>
+                <textarea
+                  value={purposeOfUse}
+                  onChange={(e) => setPurposeOfUse(e.target.value)}
+                  placeholder="E.g., Managing multiple projects, tracking habits, organizing life..."
+                  className="w-full bg-white border-2 border-orange-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-orange-400 text-gray-800 placeholder-gray-400 min-h-[100px]"
+                />
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setOnboardingStep(0)}
+                  className="flex-1 px-6 py-4 bg-gray-200 text-gray-700 rounded-xl font-semibold hover:bg-gray-300 transition-all"
+                >
+                  ← Back
+                </button>
+                <button
+                  onClick={() => setOnboardingStep(2)}
+                  className="flex-1 px-6 py-4 bg-gradient-to-r from-orange-400 to-amber-400 text-white rounded-xl font-semibold hover:from-orange-500 hover:to-amber-500 transition-all"
+                >
+                  Next →
+                </button>
+              </div>
+            </div>
+          )}
+
+          {onboardingStep === 2 && (
+            <div className="space-y-6">
+              <div>
+                <label className="block text-lg font-semibold text-gray-700 mb-2">
+                  Create your custom tags (up to 10)
+                </label>
+                <p className="text-sm text-gray-600 mb-4">
+                  These will help you organize and categorize your tasks
+                </p>
+                <div className="space-y-3 max-h-[400px] overflow-y-auto scrollbar-thin">
+                  {customTags.map((tag, index) => (
+                    <div key={index} className="flex gap-2">
+                      <input
+                        type="text"
+                        value={tag}
+                        onChange={(e) => updateCustomTag(index, e.target.value)}
+                        placeholder={`Tag ${index + 1} (e.g., Work, Fitness, Learning)`}
+                        className="flex-1 bg-white border-2 border-orange-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-orange-400 text-gray-800 placeholder-gray-400"
+                      />
+                      {customTags.length > 1 && (
+                        <button
+                          onClick={() => removeCustomTag(index)}
+                          className="p-3 bg-red-100 text-red-600 rounded-xl hover:bg-red-200 transition-colors"
+                        >
+                          <X size={20} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {customTags.length < 10 && (
+                  <button
+                    onClick={addCustomTagInput}
+                    className="mt-3 w-full px-4 py-3 bg-orange-100 text-orange-700 rounded-xl font-semibold hover:bg-orange-200 transition-all flex items-center justify-center gap-2"
+                  >
+                    <Plus size={20} />
+                    Add Another Tag
+                  </button>
+                )}
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setOnboardingStep(1)}
+                  className="flex-1 px-6 py-4 bg-gray-200 text-gray-700 rounded-xl font-semibold hover:bg-gray-300 transition-all"
+                >
+                  ← Back
+                </button>
+                <button
+                  onClick={completeOnboarding}
+                  className="flex-1 px-6 py-4 bg-gradient-to-r from-green-400 to-emerald-400 text-white rounded-xl font-semibold hover:from-green-500 hover:to-emerald-500 transition-all flex items-center justify-center gap-2"
+                >
+                  <Check size={20} />
+                  Complete Setup
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100">
+    <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-yellow-50 text-gray-800">
       {/* Header */}
-      <header className="border-b border-gray-800 bg-gray-900/50 backdrop-blur-sm sticky top-0 z-50">
+      <header className="border-b-2 border-orange-200 bg-white/70 backdrop-blur-sm sticky top-0 z-50 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4">
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-2 sm:gap-3">
-              <Sparkles className="text-purple-400" size={24} />
-              <h1 className="text-lg sm:text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
+              <Sun className="text-orange-500 animate-float" size={28} />
+              <h1 className="text-lg sm:text-2xl font-bold gradient-summer">
                 Personal OS
               </h1>
             </div>
+
+            {/* Tab Navigation */}
+            <div className="flex items-center gap-2 bg-orange-100/50 rounded-xl p-1">
+              <button
+                onClick={() => setActiveTab('kanban')}
+                className={`px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 ${
+                  activeTab === 'kanban'
+                    ? 'bg-white text-orange-600 shadow-md'
+                    : 'text-gray-600 hover:text-orange-600'
+                }`}
+              >
+                <LayoutGrid size={18} />
+                <span className="hidden sm:inline">Kanban</span>
+              </button>
+              <button
+                onClick={() => setActiveTab('calendar')}
+                className={`px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 ${
+                  activeTab === 'calendar'
+                    ? 'bg-white text-orange-600 shadow-md'
+                    : 'text-gray-600 hover:text-orange-600'
+                }`}
+              >
+                <CalendarIcon size={18} />
+                <span className="hidden sm:inline">Calendar</span>
+              </button>
+            </div>
+
             <div className="flex items-center gap-2 sm:gap-4">
               <button
                 onClick={handleSyncToCalendar}
-                className="px-2 sm:px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg flex items-center gap-1 sm:gap-2 transition-colors text-sm"
+                className="px-3 sm:px-4 py-2 bg-gradient-to-r from-green-400 to-emerald-400 hover:from-green-500 hover:to-emerald-500 text-white rounded-xl flex items-center gap-2 transition-all transform hover:scale-105 shadow-md text-sm"
               >
-                <Calendar size={16} />
-                <span className="hidden sm:inline">Sync Calendar</span>
+                <CalendarIcon size={16} />
+                <span className="hidden sm:inline">Sync</span>
               </button>
-              <div className="hidden md:flex items-center gap-3">
-                <img src={user.photoURL} alt={user.displayName} className="w-8 h-8 rounded-full" />
-                <span className="text-sm text-gray-400">{user.displayName}</span>
+              <div className="hidden md:flex items-center gap-3 bg-white/70 px-3 py-2 rounded-xl shadow-sm">
+                <img src={user.photoURL} alt={user.displayName} className="w-8 h-8 rounded-full border-2 border-orange-200" />
+                <span className="text-sm font-medium text-gray-700">{user.displayName}</span>
               </div>
               <button
                 onClick={handleSignOut}
-                className="p-2 hover:bg-gray-800 rounded-lg transition-colors"
+                className="p-2 hover:bg-orange-100 rounded-xl transition-colors"
                 title="Sign Out"
               >
-                <LogOut size={18} />
+                <LogOut size={18} className="text-gray-600" />
               </button>
             </div>
           </div>
         </div>
       </header>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-8 space-y-4 sm:space-y-8">
-        {/* Search Bar */}
-        <section className="space-y-2">
-          <div className="relative">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search tasks... (Press / to search)"
-              className="w-full bg-gray-900/50 border border-gray-700 rounded-lg pl-12 pr-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-gray-600"
-            />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery('')}
-                className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-300"
-              >
-                <X size={20} />
-              </button>
-            )}
-          </div>
-          <div className="flex items-center gap-4 text-xs text-gray-500">
-            <span>⌨️ Shortcuts:</span>
-            <span><kbd className="px-1.5 py-0.5 bg-gray-800 rounded border border-gray-700">/</kbd> Search</span>
-            <span><kbd className="px-1.5 py-0.5 bg-gray-800 rounded border border-gray-700">N</kbd> Quick capture</span>
-            <span><kbd className="px-1.5 py-0.5 bg-gray-800 rounded border border-gray-700">ESC</kbd> Clear/Close</span>
-          </div>
-        </section>
-
-        {/* Rule of 3 */}
-        <section className="bg-gradient-to-r from-purple-900/30 to-blue-900/30 border border-purple-700/50 rounded-xl p-6">
-          <div className="flex items-center gap-2 mb-4">
-            <Target className="text-purple-400" size={24} />
-            <h2 className="text-xl font-bold">Rule of 3 - Today's Non-Negotiables</h2>
-          </div>
-          <div className="grid gap-3">
-            {ruleOfThree.map((rule, index) => (
-              <div key={index} className="flex items-center gap-3">
-                <span className="text-2xl font-bold text-purple-400">{index + 1}.</span>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-8 space-y-4 sm:space-y-6">
+        {activeTab === 'kanban' && (
+          <>
+            {/* Search Bar */}
+            <section className="space-y-2">
+              <div className="relative">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
                 <input
                   type="text"
-                  value={rule}
-                  onChange={(e) => handleRuleChange(index, e.target.value)}
-                  placeholder={`Non-negotiable task #${index + 1}`}
-                  className="flex-1 bg-gray-900/50 border border-gray-700 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-purple-500 placeholder-gray-600"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search tasks... (Press / to search)"
+                  className="w-full bg-white/70 border-2 border-orange-200 rounded-2xl pl-12 pr-4 py-3 focus:outline-none focus:ring-2 focus:ring-orange-400 placeholder-gray-400 shadow-sm"
                 />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    <X size={20} />
+                  </button>
+                )}
               </div>
-            ))}
-          </div>
-        </section>
+              <div className="flex items-center gap-4 text-xs text-gray-500">
+                <span>⌨️ Shortcuts:</span>
+                <span><kbd className="px-2 py-1 bg-white rounded-lg border border-orange-200 shadow-sm">/</kbd> Search</span>
+                <span><kbd className="px-2 py-1 bg-white rounded-lg border border-orange-200 shadow-sm">N</kbd> Quick capture</span>
+              </div>
+            </section>
 
-        {/* Quick Capture */}
-        <section className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
-          <div className="flex items-center gap-2 mb-4">
-            <Plus className="text-blue-400" size={24} />
-            <h2 className="text-xl font-bold">Quick Capture - Brain Dump</h2>
-          </div>
-          <div className="flex gap-3">
-            <input
-              type="text"
-              value={quickCapture}
-              onChange={(e) => setQuickCapture(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && handleQuickCapture()}
-              placeholder="Quickly jot down an idea before you forget it..."
-              className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-gray-600"
-            />
-            <button
-              onClick={handleQuickCapture}
-              className="px-6 py-3 bg-blue-600 hover:bg-blue-700 rounded-lg font-semibold transition-colors"
-            >
-              Capture
-            </button>
-          </div>
-        </section>
+            {/* Rule of 3 */}
+            <section className="bg-gradient-to-r from-orange-100/70 to-amber-100/70 border-2 border-orange-300 rounded-2xl p-6 shadow-lg">
+              <div className="flex items-center gap-2 mb-4">
+                <Target className="text-orange-600" size={24} />
+                <h2 className="text-xl font-bold text-gray-800">☀️ Today's Top 3 Priorities</h2>
+              </div>
+              <div className="grid gap-3">
+                {ruleOfThree.map((rule, index) => (
+                  <div key={index} className="flex items-center gap-3">
+                    <span className="text-2xl font-bold text-orange-600">{index + 1}.</span>
+                    <input
+                      type="text"
+                      value={rule}
+                      onChange={(e) => handleRuleChange(index, e.target.value)}
+                      placeholder={`Priority #${index + 1}`}
+                      className="flex-1 bg-white/80 border-2 border-orange-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-orange-400 placeholder-gray-400 shadow-sm"
+                    />
+                  </div>
+                ))}
+              </div>
+            </section>
 
-        {/* Hub Filter */}
-        <section className="flex items-center gap-2 sm:gap-4 overflow-x-auto pb-2">
-          <Filter className="text-gray-400 flex-shrink-0" size={20} />
-          <span className="text-xs sm:text-sm font-semibold text-gray-400 flex-shrink-0">FILTER:</span>
-          {HUBS.map((hub) => {
-            const Icon = hub.icon;
-            return (
-              <button
-                key={hub.id}
-                onClick={() => setSelectedHub(hub.id)}
-                className={`px-3 sm:px-4 py-2 rounded-lg font-semibold transition-all flex items-center gap-1 sm:gap-2 flex-shrink-0 text-sm ${
-                  selectedHub === hub.id
-                    ? 'bg-gray-800 ring-2 ring-gray-600'
-                    : 'bg-gray-900/50 hover:bg-gray-800'
-                }`}
-              >
-                <Icon className={hub.color} size={16} />
-                <span className="hidden sm:inline">{hub.label}</span>
-                <span className="sm:hidden">{hub.label.split(':')[0]}</span>
-              </button>
-            );
-          })}
-        </section>
+            {/* Quick Capture */}
+            <section className="bg-white/70 border-2 border-orange-200 rounded-2xl p-6 shadow-lg">
+              <div className="flex items-center gap-2 mb-4">
+                <Plus className="text-orange-500" size={24} />
+                <h2 className="text-xl font-bold text-gray-800">💡 Quick Capture</h2>
+              </div>
+              <div className="flex gap-3">
+                <input
+                  type="text"
+                  value={quickCapture}
+                  onChange={(e) => setQuickCapture(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && handleQuickCapture()}
+                  placeholder="Capture an idea before it flies away..."
+                  className="flex-1 bg-white border-2 border-orange-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-orange-400 placeholder-gray-400 shadow-sm"
+                />
+                <button
+                  onClick={handleQuickCapture}
+                  className="px-6 py-3 bg-gradient-to-r from-orange-400 to-amber-400 hover:from-orange-500 hover:to-amber-500 text-white rounded-xl font-semibold transition-all transform hover:scale-105 shadow-md"
+                >
+                  Capture
+                </button>
+              </div>
+            </section>
 
-        {/* Kanban Board */}
-        <DragDropContext onDragEnd={handleDragEnd}>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {Object.values(COLUMNS).map((column) => (
-              <Droppable key={column.id} droppableId={column.id}>
-                {(provided, snapshot) => (
-                  <div
-                    ref={provided.innerRef}
-                    {...provided.droppableProps}
-                    className={`bg-gray-900/50 border-2 ${column.color} rounded-xl p-4 min-h-[500px] ${
-                      snapshot.isDraggingOver ? 'bg-gray-800/50' : ''
+            {/* Hub Filter */}
+            <section className="flex items-center gap-2 sm:gap-4 overflow-x-auto pb-2">
+              <span className="text-sm font-semibold text-gray-600 flex-shrink-0">FILTER:</span>
+              {HUBS.map((hub) => {
+                const Icon = hub.icon;
+                return (
+                  <button
+                    key={hub.id}
+                    onClick={() => setSelectedHub(hub.id)}
+                    className={`px-4 py-2 rounded-xl font-semibold transition-all flex items-center gap-2 flex-shrink-0 text-sm shadow-sm ${
+                      selectedHub === hub.id
+                        ? 'bg-white ring-2 ring-orange-400 text-orange-600'
+                        : 'bg-white/70 hover:bg-white text-gray-600'
                     }`}
                   >
-                    <h3 className="font-bold text-lg mb-4 text-gray-200">{column.title}</h3>
-                    <div className="space-y-3">
-                      {filterCardsByHub(cards[column.id]).map((card, index) => (
-                        <Draggable key={card.id} draggableId={card.id} index={index}>
-                          {(provided, snapshot) => (
-                            <div
-                              ref={provided.innerRef}
-                              {...provided.draggableProps}
-                              {...provided.dragHandleProps}
-                              className={`bg-gray-800 border border-gray-700 rounded-lg p-4 space-y-3 hover:border-gray-600 transition-all ${
-                                snapshot.isDragging ? 'shadow-2xl ring-2 ring-blue-500' : ''
-                              } ${expandedCard === card.id ? 'ring-1 ring-blue-500/50' : ''}`}
-                            >
-                              {/* Header: Title & Actions */}
-                              <div className="flex items-start justify-between gap-2">
-                                {editingCard === card.id ? (
-                                  <input
-                                    type="text"
-                                    value={card.title}
-                                    onChange={(e) => updateCardField(column.id, card.id, 'title', e.target.value)}
-                                    onBlur={() => setEditingCard(null)}
-                                    onKeyPress={(e) => e.key === 'Enter' && setEditingCard(null)}
-                                    autoFocus
-                                    className="flex-1 bg-gray-900 border border-blue-500 rounded px-2 py-1 text-sm font-medium focus:outline-none"
-                                  />
-                                ) : (
-                                  <p
-                                    onClick={() => setEditingCard(card.id)}
-                                    className="text-sm font-medium flex-1 cursor-pointer hover:text-blue-400 transition-colors"
-                                  >
-                                    {card.title}
-                                  </p>
-                                )}
-                                <div className="flex items-center gap-1">
-                                  <button
-                                    onClick={() => toggleCardExpansion(card.id)}
-                                    className="text-gray-400 hover:text-blue-400 transition-colors"
-                                    title="Expand details"
-                                  >
-                                    <FileText size={16} />
-                                  </button>
-                                  <div className="relative">
-                                    <button
-                                      onClick={() => setShowCardMenu(showCardMenu === card.id ? null : card.id)}
-                                      className="text-gray-400 hover:text-gray-300 transition-colors"
-                                    >
-                                      <MoreVertical size={16} />
-                                    </button>
-                                    {showCardMenu === card.id && (
-                                      <div className="absolute right-0 top-6 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-10 min-w-[150px]">
-                                        <button
-                                          onClick={() => duplicateCard(column.id, card)}
-                                          className="w-full px-4 py-2 text-left text-sm hover:bg-gray-800 flex items-center gap-2"
-                                        >
-                                          <Copy size={14} />
-                                          Duplicate
-                                        </button>
-                                        <button
-                                          onClick={() => {
-                                            handleDeleteCard(column.id, card.id);
-                                            setShowCardMenu(null);
-                                          }}
-                                          className="w-full px-4 py-2 text-left text-sm hover:bg-gray-800 text-red-400 flex items-center gap-2"
-                                        >
-                                          <Trash2 size={14} />
-                                          Delete
-                                        </button>
-                                      </div>
+                    <Icon className={hub.color} size={16} />
+                    <span>{hub.label}</span>
+                  </button>
+                );
+              })}
+            </section>
+
+            {/* Kanban Board */}
+            <DragDropContext onDragEnd={handleDragEnd}>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                {Object.values(COLUMNS).map((column) => (
+                  <Droppable key={column.id} droppableId={column.id}>
+                    {(provided, snapshot) => (
+                      <div
+                        ref={provided.innerRef}
+                        {...provided.droppableProps}
+                        className={`${column.color} border-2 rounded-2xl p-4 min-h-[500px] shadow-lg transition-all ${
+                          snapshot.isDraggingOver ? 'ring-2 ring-orange-400 scale-[1.02]' : ''
+                        }`}
+                      >
+                        <h3 className="font-bold text-lg mb-4 text-gray-800">{column.title}</h3>
+                        <div className="space-y-3">
+                          {filterCardsByHub(cards[column.id]).map((card, index) => (
+                            <Draggable key={card.id} draggableId={card.id} index={index}>
+                              {(provided, snapshot) => (
+                                <div
+                                  ref={provided.innerRef}
+                                  {...provided.draggableProps}
+                                  {...provided.dragHandleProps}
+                                  className={`bg-white border-2 border-orange-200 rounded-xl p-4 space-y-3 hover:border-orange-400 transition-all shadow-md ${
+                                    snapshot.isDragging ? 'shadow-2xl ring-2 ring-orange-500 rotate-2 scale-105' : ''
+                                  } ${expandedCard === card.id ? 'ring-2 ring-orange-400' : ''}`}
+                                >
+                                  {/* Header: Title & Actions */}
+                                  <div className="flex items-start justify-between gap-2">
+                                    {editingCard === card.id ? (
+                                      <input
+                                        type="text"
+                                        value={card.title}
+                                        onChange={(e) => updateCardField(column.id, card.id, 'title', e.target.value)}
+                                        onBlur={() => setEditingCard(null)}
+                                        onKeyPress={(e) => e.key === 'Enter' && setEditingCard(null)}
+                                        autoFocus
+                                        className="flex-1 bg-orange-50 border-2 border-orange-300 rounded-lg px-2 py-1 text-sm font-medium focus:outline-none"
+                                      />
+                                    ) : (
+                                      <p
+                                        onClick={() => setEditingCard(card.id)}
+                                        className="text-sm font-medium flex-1 cursor-pointer hover:text-orange-600 transition-colors text-gray-800"
+                                      >
+                                        {card.title}
+                                      </p>
                                     )}
+                                    <div className="flex items-center gap-1">
+                                      <button
+                                        onClick={() => toggleCardExpansion(card.id)}
+                                        className="text-gray-400 hover:text-orange-600 transition-colors"
+                                        title="Expand details"
+                                      >
+                                        <FileText size={16} />
+                                      </button>
+                                      <div className="relative">
+                                        <button
+                                          onClick={() => setShowCardMenu(showCardMenu === card.id ? null : card.id)}
+                                          className="text-gray-400 hover:text-gray-600 transition-colors"
+                                        >
+                                          <MoreVertical size={16} />
+                                        </button>
+                                        {showCardMenu === card.id && (
+                                          <div className="absolute right-0 top-6 bg-white border-2 border-orange-200 rounded-xl shadow-xl z-10 min-w-[150px] overflow-hidden">
+                                            <button
+                                              onClick={() => duplicateCard(column.id, card)}
+                                              className="w-full px-4 py-2 text-left text-sm hover:bg-orange-50 flex items-center gap-2 transition-colors"
+                                            >
+                                              <Copy size={14} />
+                                              Duplicate
+                                            </button>
+                                            <button
+                                              onClick={() => {
+                                                handleDeleteCard(column.id, card.id);
+                                                setShowCardMenu(null);
+                                              }}
+                                              className="w-full px-4 py-2 text-left text-sm hover:bg-red-50 text-red-600 flex items-center gap-2 transition-colors"
+                                            >
+                                              <Trash2 size={14} />
+                                              Delete
+                                            </button>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* Priority */}
+                                  <div className="flex items-center gap-2">
+                                    <select
+                                      value={card.priority || 'medium'}
+                                      onChange={(e) => updateCardField(column.id, card.id, 'priority', e.target.value)}
+                                      className={`text-xs px-2 py-1 rounded-lg border-2 focus:outline-none focus:ring-2 focus:ring-orange-400 ${
+                                        card.priority === 'high'
+                                          ? 'bg-red-100 text-red-700 border-red-300'
+                                          : card.priority === 'low'
+                                          ? 'bg-gray-100 text-gray-700 border-gray-300'
+                                          : 'bg-yellow-100 text-yellow-700 border-yellow-300'
+                                      }`}
+                                    >
+                                      <option value="high">🔴 High</option>
+                                      <option value="medium">🟡 Medium</option>
+                                      <option value="low">⚪ Low</option>
+                                    </select>
+                                  </div>
+
+                                  {/* Due Date */}
+                                  <div className="flex items-center gap-2">
+                                    <Clock size={14} className="text-gray-500" />
+                                    <input
+                                      type="date"
+                                      value={card.dueDate || ''}
+                                      onChange={(e) => updateCardField(column.id, card.id, 'dueDate', e.target.value)}
+                                      className="text-xs bg-white border-2 border-orange-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-orange-400 text-gray-700"
+                                    />
+                                  </div>
+
+                                  {/* Expanded Description */}
+                                  {expandedCard === card.id && (
+                                    <div className="space-y-2 pt-2 border-t-2 border-orange-100">
+                                      <textarea
+                                        value={card.description || ''}
+                                        onChange={(e) => updateCardField(column.id, card.id, 'description', e.target.value)}
+                                        placeholder="Add notes, links, details..."
+                                        className="w-full bg-orange-50/50 border-2 border-orange-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 placeholder-gray-400 min-h-[80px]"
+                                      />
+                                    </div>
+                                  )}
+
+                                  {/* Role Tags */}
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {userRoles.map((role) => (
+                                      <button
+                                        key={role.id}
+                                        onClick={() => toggleRole(column.id, card.id, role.id)}
+                                        className={`px-2 py-1 rounded-lg text-xs font-semibold transition-all shadow-sm ${
+                                          card.roles.includes(role.id)
+                                            ? `${role.color} text-white`
+                                            : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
+                                        }`}
+                                      >
+                                        {role.label}
+                                      </button>
+                                    ))}
+                                  </div>
+
+                                  {/* Card Meta */}
+                                  <div className="text-xs text-gray-500 pt-1 border-t border-orange-100">
+                                    {new Date(card.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                                   </div>
                                 </div>
-                              </div>
-
-                              {/* Priority */}
-                              <div className="flex items-center gap-2">
-                                <select
-                                  value={card.priority || 'medium'}
-                                  onChange={(e) => updateCardField(column.id, card.id, 'priority', e.target.value)}
-                                  className={`text-xs px-2 py-1 rounded border-0 focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                                    card.priority === 'high'
-                                      ? 'bg-red-500/20 text-red-400'
-                                      : card.priority === 'low'
-                                      ? 'bg-gray-700 text-gray-400'
-                                      : 'bg-yellow-500/20 text-yellow-400'
-                                  }`}
-                                >
-                                  <option value="high">🔴 High Priority</option>
-                                  <option value="medium">🟡 Medium</option>
-                                  <option value="low">⚪ Low</option>
-                                </select>
-                              </div>
-
-                              {/* Due Date */}
-                              <div className="flex items-center gap-2">
-                                <Clock size={14} className="text-gray-500" />
-                                <input
-                                  type="date"
-                                  value={card.dueDate || ''}
-                                  onChange={(e) => updateCardField(column.id, card.id, 'dueDate', e.target.value)}
-                                  className="text-xs bg-gray-900 border border-gray-700 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-400"
-                                />
-                              </div>
-
-                              {/* Expanded Description */}
-                              {expandedCard === card.id && (
-                                <div className="space-y-2 pt-2 border-t border-gray-700">
-                                  <textarea
-                                    value={card.description || ''}
-                                    onChange={(e) => updateCardField(column.id, card.id, 'description', e.target.value)}
-                                    placeholder="Add description, notes, links..."
-                                    className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder-gray-600 min-h-[80px]"
-                                  />
-                                </div>
                               )}
+                            </Draggable>
+                          ))}
+                          {provided.placeholder}
+                        </div>
+                      </div>
+                    )}
+                  </Droppable>
+                ))}
+              </div>
+            </DragDropContext>
+          </>
+        )}
 
-                              {/* Role Tags */}
-                              <div className="flex flex-wrap gap-1.5">
-                                {ROLES.map((role) => (
-                                  <button
-                                    key={role.id}
-                                    onClick={() => toggleRole(column.id, card.id, role.id)}
-                                    className={`px-2 py-0.5 rounded text-xs font-semibold transition-all ${
-                                      card.roles.includes(role.id)
-                                        ? `${role.color} text-white`
-                                        : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
-                                    }`}
-                                  >
-                                    {role.label}
-                                  </button>
-                                ))}
-                              </div>
+        {activeTab === 'calendar' && (
+          <div className="bg-white/70 border-2 border-orange-200 rounded-2xl p-8 shadow-lg min-h-[600px]">
+            <div className="text-center space-y-6">
+              <CalendarIcon className="mx-auto text-orange-500" size={80} />
+              <div>
+                <h2 className="text-3xl font-bold gradient-summer mb-2">Calendar View</h2>
+                <p className="text-gray-600 text-lg">
+                  Your synced events and tasks will appear here
+                </p>
+              </div>
 
-                              {/* Card Meta */}
-                              <div className="text-xs text-gray-500 pt-1 border-t border-gray-700/50">
-                                Created {new Date(card.createdAt).toLocaleDateString()}
-                              </div>
-                            </div>
-                          )}
-                        </Draggable>
-                      ))}
-                      {provided.placeholder}
+              {calendarEvents.length > 0 ? (
+                <div className="grid gap-4 mt-8">
+                  {calendarEvents.slice(0, 10).map((event, index) => (
+                    <div
+                      key={index}
+                      className="bg-gradient-to-r from-orange-100/50 to-amber-100/50 border-2 border-orange-200 rounded-xl p-4 text-left"
+                    >
+                      <h3 className="font-semibold text-gray-800">{event.summary || 'Untitled Event'}</h3>
+                      <p className="text-sm text-gray-600 mt-1">
+                        {event.start?.dateTime
+                          ? new Date(event.start.dateTime).toLocaleString('en-US', {
+                              weekday: 'short',
+                              month: 'short',
+                              day: 'numeric',
+                              hour: 'numeric',
+                              minute: '2-digit',
+                            })
+                          : 'All day'}
+                      </p>
                     </div>
-                  </div>
-                )}
-              </Droppable>
-            ))}
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-8">
+                  <p className="text-gray-500 mb-4">No calendar events synced yet</p>
+                  <button
+                    onClick={handleSyncToCalendar}
+                    className="px-6 py-3 bg-gradient-to-r from-orange-400 to-amber-400 hover:from-orange-500 hover:to-amber-500 text-white rounded-xl font-semibold transition-all transform hover:scale-105 shadow-md mx-auto"
+                  >
+                    Sync Tasks to Calendar
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
-        </DragDropContext>
+        )}
       </div>
     </div>
   );
