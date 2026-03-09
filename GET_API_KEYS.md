@@ -358,6 +358,28 @@ Now create a file called `.env` in your project root:
 - Go directly to Step 2.4 (Create OAuth Client ID)
 - Google will prompt you to configure consent screen if needed
 
+### "Google hasn't verified this app" Warning ⚠️
+
+**Problem**: When signing in, you see "Google hasn't verified this app" with a warning screen
+
+**Solution**: This is completely NORMAL for apps in development/testing mode! Here's how to proceed:
+
+1. **Click "Advanced"** at the bottom of the warning screen
+2. **Click "Go to Personal OS (unsafe)"** - Don't worry, your own app is safe!
+3. **Grant permissions** - Allow access to Calendar and profile
+
+**Why this happens:**
+- Your app is in "Testing" mode (not published to the public)
+- This is the CORRECT setup for personal use
+- Only you and test users you add can access it
+- Your data is completely safe - it's YOUR app!
+
+**To avoid this warning (optional):**
+- Go to Google Cloud Console → OAuth consent screen
+- Add yourself as a test user
+- Or click "Publish App" if you want to make it public (requires verification)
+- For personal use, just click "Advanced" → "Go to..." each time you sign in
+
 ### "The app is in testing mode" Warning
 
 **Problem**: After setting up OAuth, you see "Testing" status

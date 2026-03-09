@@ -77,7 +77,16 @@ export const createCalendarEvent = async (accessToken, task) => {
  * Sync tasks to calendar
  */
 export const syncTasksToCalendar = async (accessToken, tasks) => {
+  if (!accessToken) {
+    throw new Error('No access token available. Please sign in again.');
+  }
+
+  if (!tasks || tasks.length === 0) {
+    throw new Error('No tasks to sync.');
+  }
+
   const syncedTasks = [];
+  const failedTasks = [];
 
   for (const task of tasks) {
     try {
@@ -85,8 +94,13 @@ export const syncTasksToCalendar = async (accessToken, tasks) => {
       syncedTasks.push({ ...task, calendarEventId: event.id });
     } catch (error) {
       console.error(`Failed to sync task ${task.id}:`, error);
+      failedTasks.push({ task, error: error.message });
     }
   }
 
-  return syncedTasks;
+  if (failedTasks.length > 0 && syncedTasks.length === 0) {
+    throw new Error(`Failed to sync all tasks. ${failedTasks[0].error}`);
+  }
+
+  return { syncedTasks, failedTasks };
 };

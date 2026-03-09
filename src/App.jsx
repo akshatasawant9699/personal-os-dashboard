@@ -15,6 +15,13 @@ import {
   Briefcase,
   Plane,
   User,
+  MoreVertical,
+  Copy,
+  Clock,
+  AlertCircle,
+  Search,
+  Save,
+  FileText,
 } from 'lucide-react';
 import { auth, signInWithGoogle, signOutUser } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -58,6 +65,9 @@ function App() {
   });
   const [editingCard, setEditingCard] = useState(null);
   const [calendarEvents, setCalendarEvents] = useState([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [expandedCard, setExpandedCard] = useState(null);
+  const [showCardMenu, setShowCardMenu] = useState(null);
 
   // Authentication listener
   useEffect(() => {
@@ -95,6 +105,39 @@ function App() {
       saveUserData(user.uid, { ruleOfThree, cards });
     }
   }, [ruleOfThree, cards, user]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyPress = (e) => {
+      // Ignore if user is typing in an input/textarea
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+        return;
+      }
+
+      // "/" - Focus search
+      if (e.key === '/') {
+        e.preventDefault();
+        document.querySelector('input[placeholder*="Search"]')?.focus();
+      }
+
+      // "n" - Focus quick capture
+      if (e.key === 'n') {
+        e.preventDefault();
+        document.querySelector('input[placeholder*="Quickly jot"]')?.focus();
+      }
+
+      // "Escape" - Clear search and close menus
+      if (e.key === 'Escape') {
+        setSearchQuery('');
+        setShowCardMenu(null);
+        setExpandedCard(null);
+        setEditingCard(null);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, []);
 
   // Load calendar events
   const loadCalendarEvents = async () => {
@@ -143,7 +186,10 @@ function App() {
     const newCard = {
       id: Date.now().toString(),
       title: quickCapture,
+      description: '',
       roles: [],
+      priority: 'medium',
+      dueDate: null,
       createdAt: new Date().toISOString(),
     };
 
@@ -216,37 +262,102 @@ function App() {
     }));
   };
 
-  // Filter cards by hub
+  // Update card field
+  const updateCardField = (columnId, cardId, field, value) => {
+    setCards((prev) => ({
+      ...prev,
+      [columnId]: prev[columnId].map((card) =>
+        card.id === cardId ? { ...card, [field]: value } : card
+      ),
+    }));
+  };
+
+  // Duplicate card
+  const duplicateCard = (columnId, card) => {
+    const newCard = {
+      ...card,
+      id: Date.now().toString(),
+      title: `${card.title} (Copy)`,
+      createdAt: new Date().toISOString(),
+    };
+    setCards((prev) => ({
+      ...prev,
+      [columnId]: [...prev[columnId], newCard],
+    }));
+    setShowCardMenu(null);
+  };
+
+  // Toggle card expansion
+  const toggleCardExpansion = (cardId) => {
+    setExpandedCard(expandedCard === cardId ? null : cardId);
+  };
+
+  // Filter cards by hub and search
   const filterCardsByHub = (cardList) => {
-    if (selectedHub === 'all') return cardList;
-    return cardList.filter((card) =>
-      card.roles.some((roleId) => {
-        const role = ROLES.find((r) => r.id === roleId);
-        return role && role.hub === selectedHub;
-      })
-    );
+    let filtered = cardList;
+
+    // Filter by hub
+    if (selectedHub !== 'all') {
+      filtered = filtered.filter((card) =>
+        card.roles.some((roleId) => {
+          const role = ROLES.find((r) => r.id === roleId);
+          return role && role.hub === selectedHub;
+        })
+      );
+    }
+
+    // Filter by search query
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter(
+        (card) =>
+          card.title.toLowerCase().includes(query) ||
+          (card.description && card.description.toLowerCase().includes(query))
+      );
+    }
+
+    return filtered;
   };
 
   // Sync to calendar
   const handleSyncToCalendar = async () => {
     const accessToken = localStorage.getItem('google_access_token');
     if (!accessToken) {
-      alert('Please sign in to sync with Google Calendar');
+      alert('Please sign out and sign in again to refresh your Google Calendar access.');
+      return;
+    }
+
+    const tasksToSync = cards.readyToPublish;
+    if (tasksToSync.length === 0) {
+      alert('No tasks in "Ready to Publish" column to sync. Move some tasks there first!');
       return;
     }
 
     try {
-      const tasksToSync = cards.readyToPublish.map((card) => ({
+      const tasksData = tasksToSync.map((card) => ({
         id: card.id,
         title: card.title,
         description: `Roles: ${card.roles.map((r) => ROLES.find((role) => role.id === r)?.label).join(', ')}`,
+        startTime: new Date().toISOString(),
+        endTime: new Date(Date.now() + 60 * 60 * 1000).toISOString(), // 1 hour from now
       }));
 
-      await syncTasksToCalendar(accessToken, tasksToSync);
-      alert('Tasks synced to Google Calendar successfully!');
+      const result = await syncTasksToCalendar(accessToken, tasksData);
+
+      if (result.failedTasks && result.failedTasks.length > 0) {
+        alert(`Synced ${result.syncedTasks.length} tasks successfully. ${result.failedTasks.length} tasks failed. Please sign out and sign in again to refresh your access.`);
+      } else {
+        alert(`Successfully synced ${result.syncedTasks.length} tasks to Google Calendar!`);
+      }
+
       loadCalendarEvents();
     } catch (error) {
-      alert('Failed to sync to calendar: ' + error.message);
+      console.error('Calendar sync error:', error);
+      if (error.message.includes('token') || error.message.includes('401') || error.message.includes('403')) {
+        alert('Your Google Calendar access has expired. Please sign out and sign in again to refresh access.');
+      } else {
+        alert('Failed to sync to calendar: ' + error.message);
+      }
     }
   };
 
@@ -284,24 +395,24 @@ function App() {
     <div className="min-h-screen bg-gray-950 text-gray-100">
       {/* Header */}
       <header className="border-b border-gray-800 bg-gray-900/50 backdrop-blur-sm sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Sparkles className="text-purple-400" size={32} />
-              <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-2 sm:gap-3">
+              <Sparkles className="text-purple-400" size={24} />
+              <h1 className="text-lg sm:text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
                 Personal OS
               </h1>
             </div>
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 sm:gap-4">
               <button
                 onClick={handleSyncToCalendar}
-                className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg flex items-center gap-2 transition-colors"
+                className="px-2 sm:px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg flex items-center gap-1 sm:gap-2 transition-colors text-sm"
               >
-                <Calendar size={20} />
-                Sync Calendar
+                <Calendar size={16} />
+                <span className="hidden sm:inline">Sync Calendar</span>
               </button>
-              <div className="flex items-center gap-3">
-                <img src={user.photoURL} alt={user.displayName} className="w-10 h-10 rounded-full" />
+              <div className="hidden md:flex items-center gap-3">
+                <img src={user.photoURL} alt={user.displayName} className="w-8 h-8 rounded-full" />
                 <span className="text-sm text-gray-400">{user.displayName}</span>
               </div>
               <button
@@ -309,14 +420,42 @@ function App() {
                 className="p-2 hover:bg-gray-800 rounded-lg transition-colors"
                 title="Sign Out"
               >
-                <LogOut size={20} />
+                <LogOut size={18} />
               </button>
             </div>
           </div>
         </div>
       </header>
 
-      <div className="max-w-7xl mx-auto px-6 py-8 space-y-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-8 space-y-4 sm:space-y-8">
+        {/* Search Bar */}
+        <section className="space-y-2">
+          <div className="relative">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search tasks... (Press / to search)"
+              className="w-full bg-gray-900/50 border border-gray-700 rounded-lg pl-12 pr-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-gray-600"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-300"
+              >
+                <X size={20} />
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-4 text-xs text-gray-500">
+            <span>⌨️ Shortcuts:</span>
+            <span><kbd className="px-1.5 py-0.5 bg-gray-800 rounded border border-gray-700">/</kbd> Search</span>
+            <span><kbd className="px-1.5 py-0.5 bg-gray-800 rounded border border-gray-700">N</kbd> Quick capture</span>
+            <span><kbd className="px-1.5 py-0.5 bg-gray-800 rounded border border-gray-700">ESC</kbd> Clear/Close</span>
+          </div>
+        </section>
+
         {/* Rule of 3 */}
         <section className="bg-gradient-to-r from-purple-900/30 to-blue-900/30 border border-purple-700/50 rounded-xl p-6">
           <div className="flex items-center gap-2 mb-4">
@@ -364,23 +503,24 @@ function App() {
         </section>
 
         {/* Hub Filter */}
-        <section className="flex items-center gap-4 flex-wrap">
-          <Filter className="text-gray-400" size={20} />
-          <span className="text-sm font-semibold text-gray-400">FILTER BY HUB:</span>
+        <section className="flex items-center gap-2 sm:gap-4 overflow-x-auto pb-2">
+          <Filter className="text-gray-400 flex-shrink-0" size={20} />
+          <span className="text-xs sm:text-sm font-semibold text-gray-400 flex-shrink-0">FILTER:</span>
           {HUBS.map((hub) => {
             const Icon = hub.icon;
             return (
               <button
                 key={hub.id}
                 onClick={() => setSelectedHub(hub.id)}
-                className={`px-4 py-2 rounded-lg font-semibold transition-all flex items-center gap-2 ${
+                className={`px-3 sm:px-4 py-2 rounded-lg font-semibold transition-all flex items-center gap-1 sm:gap-2 flex-shrink-0 text-sm ${
                   selectedHub === hub.id
                     ? 'bg-gray-800 ring-2 ring-gray-600'
                     : 'bg-gray-900/50 hover:bg-gray-800'
                 }`}
               >
-                <Icon className={hub.color} size={18} />
-                {hub.label}
+                <Icon className={hub.color} size={16} />
+                <span className="hidden sm:inline">{hub.label}</span>
+                <span className="sm:hidden">{hub.label.split(':')[0]}</span>
               </button>
             );
           })}
@@ -408,25 +548,119 @@ function App() {
                               ref={provided.innerRef}
                               {...provided.draggableProps}
                               {...provided.dragHandleProps}
-                              className={`bg-gray-800 border border-gray-700 rounded-lg p-4 space-y-3 ${
+                              className={`bg-gray-800 border border-gray-700 rounded-lg p-4 space-y-3 hover:border-gray-600 transition-all ${
                                 snapshot.isDragging ? 'shadow-2xl ring-2 ring-blue-500' : ''
-                              }`}
+                              } ${expandedCard === card.id ? 'ring-1 ring-blue-500/50' : ''}`}
                             >
+                              {/* Header: Title & Actions */}
                               <div className="flex items-start justify-between gap-2">
-                                <p className="text-sm font-medium flex-1">{card.title}</p>
-                                <button
-                                  onClick={() => handleDeleteCard(column.id, card.id)}
-                                  className="text-red-400 hover:text-red-300 transition-colors"
-                                >
-                                  <Trash2 size={16} />
-                                </button>
+                                {editingCard === card.id ? (
+                                  <input
+                                    type="text"
+                                    value={card.title}
+                                    onChange={(e) => updateCardField(column.id, card.id, 'title', e.target.value)}
+                                    onBlur={() => setEditingCard(null)}
+                                    onKeyPress={(e) => e.key === 'Enter' && setEditingCard(null)}
+                                    autoFocus
+                                    className="flex-1 bg-gray-900 border border-blue-500 rounded px-2 py-1 text-sm font-medium focus:outline-none"
+                                  />
+                                ) : (
+                                  <p
+                                    onClick={() => setEditingCard(card.id)}
+                                    className="text-sm font-medium flex-1 cursor-pointer hover:text-blue-400 transition-colors"
+                                  >
+                                    {card.title}
+                                  </p>
+                                )}
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    onClick={() => toggleCardExpansion(card.id)}
+                                    className="text-gray-400 hover:text-blue-400 transition-colors"
+                                    title="Expand details"
+                                  >
+                                    <FileText size={16} />
+                                  </button>
+                                  <div className="relative">
+                                    <button
+                                      onClick={() => setShowCardMenu(showCardMenu === card.id ? null : card.id)}
+                                      className="text-gray-400 hover:text-gray-300 transition-colors"
+                                    >
+                                      <MoreVertical size={16} />
+                                    </button>
+                                    {showCardMenu === card.id && (
+                                      <div className="absolute right-0 top-6 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-10 min-w-[150px]">
+                                        <button
+                                          onClick={() => duplicateCard(column.id, card)}
+                                          className="w-full px-4 py-2 text-left text-sm hover:bg-gray-800 flex items-center gap-2"
+                                        >
+                                          <Copy size={14} />
+                                          Duplicate
+                                        </button>
+                                        <button
+                                          onClick={() => {
+                                            handleDeleteCard(column.id, card.id);
+                                            setShowCardMenu(null);
+                                          }}
+                                          className="w-full px-4 py-2 text-left text-sm hover:bg-gray-800 text-red-400 flex items-center gap-2"
+                                        >
+                                          <Trash2 size={14} />
+                                          Delete
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
                               </div>
-                              <div className="flex flex-wrap gap-2">
+
+                              {/* Priority */}
+                              <div className="flex items-center gap-2">
+                                <select
+                                  value={card.priority || 'medium'}
+                                  onChange={(e) => updateCardField(column.id, card.id, 'priority', e.target.value)}
+                                  className={`text-xs px-2 py-1 rounded border-0 focus:outline-none focus:ring-1 focus:ring-blue-500 ${
+                                    card.priority === 'high'
+                                      ? 'bg-red-500/20 text-red-400'
+                                      : card.priority === 'low'
+                                      ? 'bg-gray-700 text-gray-400'
+                                      : 'bg-yellow-500/20 text-yellow-400'
+                                  }`}
+                                >
+                                  <option value="high">🔴 High Priority</option>
+                                  <option value="medium">🟡 Medium</option>
+                                  <option value="low">⚪ Low</option>
+                                </select>
+                              </div>
+
+                              {/* Due Date */}
+                              <div className="flex items-center gap-2">
+                                <Clock size={14} className="text-gray-500" />
+                                <input
+                                  type="date"
+                                  value={card.dueDate || ''}
+                                  onChange={(e) => updateCardField(column.id, card.id, 'dueDate', e.target.value)}
+                                  className="text-xs bg-gray-900 border border-gray-700 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-400"
+                                />
+                              </div>
+
+                              {/* Expanded Description */}
+                              {expandedCard === card.id && (
+                                <div className="space-y-2 pt-2 border-t border-gray-700">
+                                  <textarea
+                                    value={card.description || ''}
+                                    onChange={(e) => updateCardField(column.id, card.id, 'description', e.target.value)}
+                                    placeholder="Add description, notes, links..."
+                                    className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder-gray-600 min-h-[80px]"
+                                  />
+                                </div>
+                              )}
+
+                              {/* Role Tags */}
+                              <div className="flex flex-wrap gap-1.5">
                                 {ROLES.map((role) => (
                                   <button
                                     key={role.id}
                                     onClick={() => toggleRole(column.id, card.id, role.id)}
-                                    className={`px-2 py-1 rounded text-xs font-semibold transition-all ${
+                                    className={`px-2 py-0.5 rounded text-xs font-semibold transition-all ${
                                       card.roles.includes(role.id)
                                         ? `${role.color} text-white`
                                         : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
@@ -435,6 +669,11 @@ function App() {
                                     {role.label}
                                   </button>
                                 ))}
+                              </div>
+
+                              {/* Card Meta */}
+                              <div className="text-xs text-gray-500 pt-1 border-t border-gray-700/50">
+                                Created {new Date(card.createdAt).toLocaleDateString()}
                               </div>
                             </div>
                           )}
