@@ -20,6 +20,7 @@ import {
   LayoutGrid,
   Home,
   Check,
+  Settings,
 } from 'lucide-react';
 import { auth, signInWithGoogle, signOutUser, getUserData, saveUserData } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -60,6 +61,7 @@ function App() {
 
   // App state
   const [ruleOfThree, setRuleOfThree] = useState(['', '', '']);
+  const [nonPriorityTasks, setNonPriorityTasks] = useState(['', '']);
   const [quickCapture, setQuickCapture] = useState('');
   const [selectedHub, setSelectedHub] = useState('all');
   const [cards, setCards] = useState({
@@ -97,6 +99,7 @@ function App() {
       if (userData) {
         // Existing user
         setRuleOfThree(userData.ruleOfThree || ['', '', '']);
+        setNonPriorityTasks(userData.nonPriorityTasks || ['', '']);
         setCards(userData.cards || { ideas: [], inProgress: [], readyToPublish: [], done: [] });
         setUserRoles(userData.customRoles || DEFAULT_ROLES);
         setAreasOfFocus(userData.areasOfFocus || '');
@@ -118,6 +121,7 @@ function App() {
     try {
       await saveUserData(user.uid, {
         ruleOfThree,
+        nonPriorityTasks,
         cards,
         customRoles: userRoles,
         areasOfFocus,
@@ -138,7 +142,7 @@ function App() {
 
       return () => clearTimeout(timer);
     }
-  }, [ruleOfThree, cards, user, showOnboarding]);
+  }, [ruleOfThree, nonPriorityTasks, cards, user, showOnboarding]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -207,6 +211,7 @@ function App() {
       areasOfFocus,
       purposeOfUse,
       ruleOfThree: ['', '', ''],
+      nonPriorityTasks: ['', ''],
       cards: { ideas: [], inProgress: [], readyToPublish: [], done: [] },
       lastUpdated: new Date().toISOString(),
     });
@@ -240,6 +245,52 @@ function App() {
     const newRules = [...ruleOfThree];
     newRules[index] = value;
     setRuleOfThree(newRules);
+  };
+
+  // Handle non-priority task changes
+  const handleNonPriorityChange = (index, value) => {
+    const newTasks = [...nonPriorityTasks];
+    newTasks[index] = value;
+    setNonPriorityTasks(newTasks);
+  };
+
+  // Add all tasks to board
+  const handleAddToBoard = () => {
+    const allTasks = [...ruleOfThree, ...nonPriorityTasks];
+    const tasksToAdd = allTasks.filter(task => task.trim() !== '');
+
+    if (tasksToAdd.length === 0) {
+      alert('Please add at least one task first!');
+      return;
+    }
+
+    const newCards = tasksToAdd.map((task, index) => ({
+      id: Date.now().toString() + index,
+      title: task,
+      description: '',
+      roles: [],
+      priority: index < 3 ? 'high' : 'low', // First 3 are priority
+      dueDate: null,
+      createdAt: new Date().toISOString(),
+    }));
+
+    setCards((prev) => ({
+      ...prev,
+      ideas: [...prev.ideas, ...newCards],
+    }));
+
+    // Clear the tasks after adding
+    setRuleOfThree(['', '', '']);
+    setNonPriorityTasks(['', '']);
+
+    alert(`Added ${tasksToAdd.length} task(s) to the board! 🎉`);
+  };
+
+  // Trigger onboarding manually
+  const triggerOnboarding = () => {
+    setOnboardingStep(0);
+    setCustomTags(['']);
+    setShowOnboarding(true);
   };
 
   // Handle Quick Capture
@@ -623,6 +674,13 @@ function App() {
                 <CalendarIcon size={16} />
                 <span className="hidden sm:inline">Sync</span>
               </button>
+              <button
+                onClick={triggerOnboarding}
+                className="p-2 hover:bg-orange-100 rounded-xl transition-colors"
+                title="Customize Tags & Settings"
+              >
+                <Settings size={18} className="text-gray-600" />
+              </button>
               <div className="hidden md:flex items-center gap-3 bg-white/70 px-3 py-2 rounded-xl shadow-sm">
                 <img src={user.photoURL} alt={user.displayName} className="w-8 h-8 rounded-full border-2 border-orange-200" />
                 <span className="text-sm font-medium text-gray-700">{user.displayName}</span>
@@ -669,25 +727,62 @@ function App() {
               </div>
             </section>
 
-            {/* Rule of 3 */}
+            {/* Daily Tasks */}
             <section className="bg-gradient-to-r from-orange-100/70 to-amber-100/70 border-2 border-orange-300 rounded-2xl p-6 shadow-lg">
-              <div className="flex items-center gap-2 mb-4">
-                <Target className="text-orange-600" size={24} />
-                <h2 className="text-xl font-bold text-gray-800">☀️ Today's Top 3 Priorities</h2>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <Target className="text-orange-600" size={24} />
+                  <h2 className="text-xl font-bold text-gray-800">☀️ Today's Tasks</h2>
+                </div>
+                <button
+                  onClick={handleAddToBoard}
+                  className="px-4 py-2 bg-gradient-to-r from-green-400 to-emerald-400 hover:from-green-500 hover:to-emerald-500 text-white rounded-xl font-semibold transition-all transform hover:scale-105 shadow-md flex items-center gap-2"
+                >
+                  <Plus size={18} />
+                  Add to Board
+                </button>
               </div>
-              <div className="grid gap-3">
-                {ruleOfThree.map((rule, index) => (
-                  <div key={index} className="flex items-center gap-3">
-                    <span className="text-2xl font-bold text-orange-600">{index + 1}.</span>
-                    <input
-                      type="text"
-                      value={rule}
-                      onChange={(e) => handleRuleChange(index, e.target.value)}
-                      placeholder={`Priority #${index + 1}`}
-                      className="flex-1 bg-white/80 border-2 border-orange-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-orange-400 placeholder-gray-400 shadow-sm"
-                    />
-                  </div>
-                ))}
+
+              {/* Top 3 Priorities */}
+              <div className="mb-4">
+                <h3 className="text-sm font-semibold text-orange-700 mb-2 uppercase tracking-wide">🔥 Top 3 Priorities</h3>
+                <div className="grid gap-2">
+                  {ruleOfThree.map((rule, index) => (
+                    <div key={index} className="flex items-center gap-3">
+                      <span className="text-2xl font-bold text-orange-600 w-8">{index + 1}.</span>
+                      <input
+                        type="text"
+                        value={rule}
+                        onChange={(e) => handleRuleChange(index, e.target.value)}
+                        placeholder={`Priority task #${index + 1}`}
+                        className="flex-1 bg-white/80 border-2 border-orange-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-orange-400 placeholder-gray-400 shadow-sm"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Non-Priority Tasks */}
+              <div>
+                <h3 className="text-sm font-semibold text-gray-600 mb-2 uppercase tracking-wide">📝 Additional Tasks</h3>
+                <div className="grid gap-2">
+                  {nonPriorityTasks.map((task, index) => (
+                    <div key={index} className="flex items-center gap-3">
+                      <span className="text-xl text-gray-500 w-8">•</span>
+                      <input
+                        type="text"
+                        value={task}
+                        onChange={(e) => handleNonPriorityChange(index, e.target.value)}
+                        placeholder={`Additional task #${index + 1}`}
+                        className="flex-1 bg-white/60 border-2 border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-gray-400 placeholder-gray-400 shadow-sm"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="mt-4 text-xs text-gray-600 bg-white/50 rounded-lg p-3">
+                💡 <strong>Tip:</strong> Focus on your top 3 priorities first! Additional tasks are low priority.
               </div>
             </section>
 
