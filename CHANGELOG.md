@@ -135,13 +135,13 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for ways to get started contributing to
 
 ## Versioning
 
-We use [SemVer](http://semver.org/) for versioning. For the versions available, see the [tags on this repository](https://github.com/yourusername/content-manager-project/tags).
+We use [SemVer](http://semver.org/) for versioning. For the versions available, see the [tags on this repository](https://github.com/akshatasawant9699/personal-os-dashboard/tags).
 
 ## Links
 
-- **Homepage**: [GitHub Repository](https://github.com/yourusername/content-manager-project)
-- **Issues**: [Issue Tracker](https://github.com/yourusername/content-manager-project/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/content-manager-project/discussions)
+- **Homepage**: [GitHub Repository](https://github.com/akshatasawant9699/personal-os-dashboard)
+- **Issues**: [Issue Tracker](https://github.com/akshatasawant9699/personal-os-dashboard/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/akshatasawant9699/personal-os-dashboard/discussions)
 - **Author**: [Akshata Sawant](https://www.linkedin.com/in/akshatasawant02/)
 
 ---

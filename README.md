@@ -10,7 +10,7 @@
 
 *A single-page React application designed to manage multiple roles and maximize productivity through synergy. Built for creators, developers, and professionals juggling multiple responsibilities.*
 
-[Live Demo](#) · [Report Bug](https://github.com/yourusername/content-manager-project/issues) · [Request Feature](https://github.com/yourusername/content-manager-project/issues)
+[Live Demo](#) · [Report Bug](https://github.com/akshatasawant9699/personal-os-dashboard/issues) · [Request Feature](https://github.com/akshatasawant9699/personal-os-dashboard/issues)
 
 </div>
 
@@ -95,8 +95,8 @@ Google Cloud Project (for Calendar API)
 1. **Clone the repository**
 
 ```bash
-git clone https://github.com/yourusername/content-manager-project.git
-cd content-manager-project
+git clone https://github.com/akshatasawant9699/personal-os-dashboard.git
+cd personal-os-dashboard
 ```
 
 2. **Install dependencies**
@@ -224,7 +224,7 @@ Open [http://localhost:5173](http://localhost:5173) in your browser.
 
 ### Deploy to Vercel (Recommended)
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/yourusername/content-manager-project)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/akshatasawant9699/personal-os-dashboard)
 
 See [DEPLOY_TO_VERCEL.md](./DEPLOY_TO_VERCEL.md) for detailed instructions.
 
@@ -324,8 +324,7 @@ This project is licensed under the MIT License - see the [LICENSE](./LICENSE) fi
 **Built by Akshata Sawant**
 
 [![LinkedIn](https://img.shields.io/badge/LinkedIn-Connect-0077B5?style=for-the-badge&logo=linkedin)](https://www.linkedin.com/in/akshatasawant02/)
-[![GitHub](https://img.shields.io/badge/GitHub-Follow-181717?style=for-the-badge&logo=github)](https://github.com/yourusername)
-[![Twitter](https://img.shields.io/badge/Twitter-Follow-1DA1F2?style=for-the-badge&logo=twitter&logoColor=white)](https://twitter.com/yourusername)
+[![GitHub](https://img.shields.io/badge/GitHub-Follow-181717?style=for-the-badge&logo=github)](https://github.com/akshatasawant9699)
 
 *Senior Developer Advocate @ Salesforce | MuleSoft Ambassador | Tech Content Creator*
 
@@ -337,9 +336,9 @@ This project is licensed under the MIT License - see the [LICENSE](./LICENSE) fi
 
 ## 📊 Project Stats
 
-![GitHub stars](https://img.shields.io/github/stars/yourusername/content-manager-project?style=social)
-![GitHub forks](https://img.shields.io/github/forks/yourusername/content-manager-project?style=social)
-![GitHub watchers](https://img.shields.io/github/watchers/yourusername/content-manager-project?style=social)
+![GitHub stars](https://img.shields.io/github/stars/akshatasawant9699/personal-os-dashboard?style=social)
+![GitHub forks](https://img.shields.io/github/forks/akshatasawant9699/personal-os-dashboard?style=social)
+![GitHub watchers](https://img.shields.io/github/watchers/akshatasawant9699/personal-os-dashboard?style=social)
 
 ---
 
