@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import {
   Target,
@@ -86,32 +86,11 @@ function App() {
   const [selectedDate, setSelectedDate] = useState(null);
   const [hasLoadedUserData, setHasLoadedUserData] = useState(false);
 
-  // Always-current ref used for synchronous saves (beforeunload, etc.)
+  // Always-current ref — written synchronously before every Firestore round-trip
   const latestDataRef = useRef(null);
 
-  // Build a plain-object snapshot of all persisted state
-  const buildSnapshot = useCallback((overrides = {}) => ({
-    ruleOfThree,
-    nonPriorityTasks,
-    cards,
-    customRoles: userRoles,
-    userHubs,
-    areasOfFocus,
-    purposeOfUse,
-    activeTab,
-    selectedHub,
-    currentDate: currentDate instanceof Date && !isNaN(currentDate)
-      ? currentDate.toISOString()
-      : new Date().toISOString(),
-    selectedDate: selectedDate instanceof Date && !isNaN(selectedDate)
-      ? selectedDate.toISOString()
-      : null,
-    lastUpdated: new Date().toISOString(),
-    ...overrides,
-  }), [ruleOfThree, nonPriorityTasks, cards, userRoles, userHubs, areasOfFocus, purposeOfUse, activeTab, selectedHub, currentDate, selectedDate]);
-
-  // Apply a data object to all state setters
-  const applyUserData = useCallback((data) => {
+  // Apply a saved data object back into all state setters
+  const applyStateFromData = (data) => {
     setRuleOfThree(data.ruleOfThree || ['', '', '']);
     setNonPriorityTasks(data.nonPriorityTasks || ['', '']);
     setCards(data.cards || { ideas: [], inProgress: [], readyToPublish: [], done: [] });
@@ -121,37 +100,11 @@ function App() {
     setPurposeOfUse(data.purposeOfUse || '');
     setActiveTab(data.activeTab || 'kanban');
     setSelectedHub(data.selectedHub || 'all');
-    const parsedCurrentDate = data.currentDate ? new Date(data.currentDate) : new Date();
-    setCurrentDate(isNaN(parsedCurrentDate) ? new Date() : parsedCurrentDate);
-    const parsedSelectedDate = data.selectedDate ? new Date(data.selectedDate) : null;
-    setSelectedDate(parsedSelectedDate && !isNaN(parsedSelectedDate) ? parsedSelectedDate : null);
-  }, []);
-
-  // Helpers for per-user localStorage cache key
-  const cacheKey = (uid) => `userDataCache_${uid}`;
-
-  const writeLocalCache = useCallback((uid, snapshot) => {
-    try {
-      localStorage.setItem(cacheKey(uid), JSON.stringify(snapshot));
-    } catch (e) {
-      console.warn('localStorage write failed:', e);
-    }
-  }, []);
-
-  const readLocalCache = useCallback((uid) => {
-    try {
-      const raw = localStorage.getItem(cacheKey(uid));
-      return raw ? JSON.parse(raw) : null;
-    } catch (e) {
-      return null;
-    }
-  }, []);
-
-  const clearLocalCache = useCallback((uid) => {
-    try {
-      localStorage.removeItem(cacheKey(uid));
-    } catch (e) { /* ignore */ }
-  }, []);
+    const pd = data.currentDate ? new Date(data.currentDate) : new Date();
+    setCurrentDate(!isNaN(pd) ? pd : new Date());
+    const psd = data.selectedDate ? new Date(data.selectedDate) : null;
+    setSelectedDate(psd && !isNaN(psd) ? psd : null);
+  };
 
   // Authentication listener
   useEffect(() => {
@@ -171,82 +124,101 @@ function App() {
     return () => unsubscribe();
   }, []);
 
-  // Load user data — localStorage first (instant), then Firestore (authoritative)
+  // Load user data: localStorage first (zero network latency), then Firestore
   const loadUserDataFromFirestore = async (userId) => {
-    console.log('📂 Loading user data for:', userId);
+    console.log('📂 Loading for:', userId);
 
-    // Step 1: Restore from localStorage immediately so the UI is populated before
-    // the network round-trip finishes. This is what survives a hard refresh.
-    const localData = readLocalCache(userId);
+    // ── Step 1: Restore from localStorage immediately ──────────────────────────
+    // localStorage writes are synchronous, so this always has the most recent
+    // local state — even if the user refreshed before the 1.5 s Firestore debounce.
+    let localData = null;
+    try {
+      const raw = localStorage.getItem(`userDataCache_${userId}`);
+      if (raw) localData = JSON.parse(raw);
+    } catch (_) {}
+
     if (localData) {
-      console.log('⚡ Instant restore from localStorage cache');
-      applyUserData(localData);
+      console.log('⚡ Restoring from localStorage');
+      applyStateFromData(localData);
       setShowOnboarding(false);
       setHasLoadedUserData(true);
     }
 
-    // Step 2: Fetch from Firestore and use whichever copy is newer
+    // ── Step 2: Fetch from Firestore for cross-device sync ────────────────────
     try {
-      const userData = await getUserData(userId);
+      const remoteData = await getUserData(userId);
 
-      if (userData) {
+      if (remoteData) {
         const localTs = localData?.lastUpdated || '0';
-        const remoteTs = userData.lastUpdated || '0';
-        const useRemote = remoteTs >= localTs;
-
-        console.log('✅ Firestore data loaded', { localTs, remoteTs, useRemote });
-
-        if (useRemote) {
-          applyUserData(userData);
-          // Keep localStorage in sync with the authoritative remote copy
-          writeLocalCache(userId, userData);
+        const remoteTs = remoteData.lastUpdated || '0';
+        // Only apply remote data when it is strictly newer (cross-device scenario)
+        if (remoteTs > localTs) {
+          console.log('☁️ Firestore is newer, applying remote data');
+          applyStateFromData(remoteData);
+          try {
+            localStorage.setItem(`userDataCache_${userId}`, JSON.stringify(remoteData));
+          } catch (_) {}
+        } else {
+          console.log('💾 localStorage is up-to-date, keeping local data');
         }
         setShowOnboarding(false);
       } else if (!localData) {
-        console.log('ℹ️ No existing user data found. Showing onboarding.');
-        setCurrentDate(new Date());
-        setSelectedDate(null);
+        console.log('ℹ️ New user — showing onboarding');
         setShowOnboarding(true);
       }
-
-      setHasLoadedUserData(true);
     } catch (error) {
-      console.error('❌ Error loading from Firestore:', error);
+      console.error('❌ Firestore load error:', error);
       if (!localData) {
-        alert('Failed to load your data. Error: ' + error.message);
-        setHasLoadedUserData(false);
+        alert('Failed to load your data. Please check your connection.');
       }
-      // If we already restored from localStorage, keep going — don't block the user
     }
+
+    setHasLoadedUserData(true);
   };
 
-  // Save user data to Firestore (cloud backup, used by debounced effect)
-  const saveUserDataToFirestore = useCallback(async (snapshot) => {
-    if (!user || !hasLoadedUserData) return;
-    const data = snapshot || buildSnapshot();
-    try {
-      await saveUserData(user.uid, data);
-      console.log('☁️ Firestore saved at', new Date().toLocaleTimeString());
-    } catch (error) {
-      console.error('❌ Firestore save error:', error);
-    }
-  }, [user, hasLoadedUserData, buildSnapshot]);
-
-  // Effect 1: Write to localStorage immediately on every state change (synchronous,
-  // survives refresh) AND update the latestDataRef used by beforeunload.
-  // Also schedules a debounced Firestore cloud save.
+  // ── Persistence effect ────────────────────────────────────────────────────────
+  // Runs on every state change once data is loaded.
+  // • Writes to localStorage IMMEDIATELY (synchronous) → survives hard refresh.
+  // • Debounces a Firestore write by 1.5 s for cloud backup / cross-device sync.
   useEffect(() => {
-    if (!user || !hasLoadedUserData || showOnboarding) return;
+    if (!user?.uid || !hasLoadedUserData || showOnboarding) return;
 
-    const snapshot = buildSnapshot();
+    // Build the snapshot inline so we are 100% sure it captures THIS render's state
+    const snapshot = {
+      ruleOfThree,
+      nonPriorityTasks,
+      cards,
+      customRoles: userRoles,
+      userHubs,
+      areasOfFocus,
+      purposeOfUse,
+      activeTab,
+      selectedHub,
+      currentDate: currentDate instanceof Date && !isNaN(currentDate)
+        ? currentDate.toISOString() : new Date().toISOString(),
+      selectedDate: selectedDate instanceof Date && !isNaN(selectedDate)
+        ? selectedDate.toISOString() : null,
+      lastUpdated: new Date().toISOString(),
+    };
 
-    // Synchronous local write — this is what makes refresh persistence reliable
+    // Synchronous localStorage write — always completes before the page unloads
     latestDataRef.current = snapshot;
-    writeLocalCache(user.uid, snapshot);
+    try {
+      localStorage.setItem(`userDataCache_${user.uid}`, JSON.stringify(snapshot));
+      console.log('💾 localStorage saved');
+    } catch (e) {
+      console.warn('localStorage write failed:', e);
+    }
 
-    // Debounced cloud save (for cross-device sync)
-    const timer = setTimeout(() => {
-      saveUserDataToFirestore(snapshot);
+    // Debounced Firestore write (cloud backup)
+    const uid = user.uid;
+    const timer = setTimeout(async () => {
+      try {
+        await saveUserData(uid, snapshot);
+        console.log('☁️ Firestore saved at', new Date().toLocaleTimeString());
+      } catch (error) {
+        console.error('❌ Firestore save error:', error);
+      }
     }, 1500);
 
     return () => clearTimeout(timer);
@@ -291,20 +263,21 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyPress);
   }, []);
 
-  // Effect 2: On page unload, write the latest snapshot to localStorage synchronously.
-  // Async Firebase saves are unreliable here — browsers abort them before completion.
-  // localStorage is synchronous and always finishes before the page closes.
+  // Synchronous localStorage flush on page close / refresh.
+  // Browsers abort async operations on unload — localStorage.setItem is synchronous
+  // and always completes. We read from the ref (always current) to avoid stale closures.
   useEffect(() => {
     const handleBeforeUnload = () => {
-      if (user && hasLoadedUserData && latestDataRef.current) {
-        // Stamp with current time so this beats any older Firestore copy
+      const uid = user?.uid;
+      if (!uid || !hasLoadedUserData || !latestDataRef.current) return;
+      try {
         const snapshot = { ...latestDataRef.current, lastUpdated: new Date().toISOString() };
-        writeLocalCache(user.uid, snapshot);
-      }
+        localStorage.setItem(`userDataCache_${uid}`, JSON.stringify(snapshot));
+      } catch (_) {}
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [user, hasLoadedUserData, writeLocalCache]);
+  }, [user, hasLoadedUserData]);
 
   // Load calendar events
   const loadCalendarEvents = async (uid) => {
@@ -353,7 +326,7 @@ function App() {
       lastUpdated: new Date().toISOString(),
     };
 
-    writeLocalCache(user.uid, onboardingData);
+    try { localStorage.setItem(`userDataCache_${user.uid}`, JSON.stringify(onboardingData)); } catch (_) {}
     latestDataRef.current = onboardingData;
     await saveUserData(user.uid, onboardingData);
 
@@ -373,9 +346,11 @@ function App() {
   const handleSignOut = async () => {
     try {
       if (user) {
-        // Final cloud save before leaving
-        await saveUserDataToFirestore();
-        clearLocalCache(user.uid);
+        // Final cloud save
+        if (latestDataRef.current) {
+          try { await saveUserData(user.uid, latestDataRef.current); } catch (_) {}
+        }
+        try { localStorage.removeItem(`userDataCache_${user.uid}`); } catch (_) {}
         latestDataRef.current = null;
       }
       await signOutUser(user.uid);
