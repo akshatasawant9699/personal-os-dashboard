@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import {
   Target,
@@ -86,6 +86,73 @@ function App() {
   const [selectedDate, setSelectedDate] = useState(null);
   const [hasLoadedUserData, setHasLoadedUserData] = useState(false);
 
+  // Always-current ref used for synchronous saves (beforeunload, etc.)
+  const latestDataRef = useRef(null);
+
+  // Build a plain-object snapshot of all persisted state
+  const buildSnapshot = useCallback((overrides = {}) => ({
+    ruleOfThree,
+    nonPriorityTasks,
+    cards,
+    customRoles: userRoles,
+    userHubs,
+    areasOfFocus,
+    purposeOfUse,
+    activeTab,
+    selectedHub,
+    currentDate: currentDate instanceof Date && !isNaN(currentDate)
+      ? currentDate.toISOString()
+      : new Date().toISOString(),
+    selectedDate: selectedDate instanceof Date && !isNaN(selectedDate)
+      ? selectedDate.toISOString()
+      : null,
+    lastUpdated: new Date().toISOString(),
+    ...overrides,
+  }), [ruleOfThree, nonPriorityTasks, cards, userRoles, userHubs, areasOfFocus, purposeOfUse, activeTab, selectedHub, currentDate, selectedDate]);
+
+  // Apply a data object to all state setters
+  const applyUserData = useCallback((data) => {
+    setRuleOfThree(data.ruleOfThree || ['', '', '']);
+    setNonPriorityTasks(data.nonPriorityTasks || ['', '']);
+    setCards(data.cards || { ideas: [], inProgress: [], readyToPublish: [], done: [] });
+    setUserRoles(data.customRoles || DEFAULT_ROLES);
+    setUserHubs(data.userHubs || DEFAULT_HUBS);
+    setAreasOfFocus(data.areasOfFocus || '');
+    setPurposeOfUse(data.purposeOfUse || '');
+    setActiveTab(data.activeTab || 'kanban');
+    setSelectedHub(data.selectedHub || 'all');
+    const parsedCurrentDate = data.currentDate ? new Date(data.currentDate) : new Date();
+    setCurrentDate(isNaN(parsedCurrentDate) ? new Date() : parsedCurrentDate);
+    const parsedSelectedDate = data.selectedDate ? new Date(data.selectedDate) : null;
+    setSelectedDate(parsedSelectedDate && !isNaN(parsedSelectedDate) ? parsedSelectedDate : null);
+  }, []);
+
+  // Helpers for per-user localStorage cache key
+  const cacheKey = (uid) => `userDataCache_${uid}`;
+
+  const writeLocalCache = useCallback((uid, snapshot) => {
+    try {
+      localStorage.setItem(cacheKey(uid), JSON.stringify(snapshot));
+    } catch (e) {
+      console.warn('localStorage write failed:', e);
+    }
+  }, []);
+
+  const readLocalCache = useCallback((uid) => {
+    try {
+      const raw = localStorage.getItem(cacheKey(uid));
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) {
+      return null;
+    }
+  }, []);
+
+  const clearLocalCache = useCallback((uid) => {
+    try {
+      localStorage.removeItem(cacheKey(uid));
+    } catch (e) { /* ignore */ }
+  }, []);
+
   // Authentication listener
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -104,111 +171,100 @@ function App() {
     return () => unsubscribe();
   }, []);
 
-  // Load user data from Firestore
+  // Load user data — localStorage first (instant), then Firestore (authoritative)
   const loadUserDataFromFirestore = async (userId) => {
     console.log('📂 Loading user data for:', userId);
+
+    // Step 1: Restore from localStorage immediately so the UI is populated before
+    // the network round-trip finishes. This is what survives a hard refresh.
+    const localData = readLocalCache(userId);
+    if (localData) {
+      console.log('⚡ Instant restore from localStorage cache');
+      applyUserData(localData);
+      setShowOnboarding(false);
+      setHasLoadedUserData(true);
+    }
+
+    // Step 2: Fetch from Firestore and use whichever copy is newer
     try {
       const userData = await getUserData(userId);
 
       if (userData) {
-        console.log('✅ User data loaded successfully:', {
-          hasRuleOfThree: !!userData.ruleOfThree,
-          hasCards: !!userData.cards,
-          tasksCount: userData.cards ? Object.values(userData.cards).reduce((sum, col) => sum + col.length, 0) : 0,
-          lastUpdated: userData.lastUpdated
-        });
+        const localTs = localData?.lastUpdated || '0';
+        const remoteTs = userData.lastUpdated || '0';
+        const useRemote = remoteTs >= localTs;
 
-        setRuleOfThree(userData.ruleOfThree || ['', '', '']);
-        setNonPriorityTasks(userData.nonPriorityTasks || ['', '']);
-        setCards(userData.cards || { ideas: [], inProgress: [], readyToPublish: [], done: [] });
-        setUserRoles(userData.customRoles || DEFAULT_ROLES);
-        setUserHubs(userData.userHubs || DEFAULT_HUBS);
-        setAreasOfFocus(userData.areasOfFocus || '');
-        setPurposeOfUse(userData.purposeOfUse || '');
-        setActiveTab(userData.activeTab || 'kanban');
-        setSelectedHub(userData.selectedHub || 'all');
-        const parsedCurrentDate = userData.currentDate ? new Date(userData.currentDate) : new Date();
-        setCurrentDate(isNaN(parsedCurrentDate) ? new Date() : parsedCurrentDate);
-        const parsedSelectedDate = userData.selectedDate ? new Date(userData.selectedDate) : null;
-        setSelectedDate(parsedSelectedDate && !isNaN(parsedSelectedDate) ? parsedSelectedDate : null);
+        console.log('✅ Firestore data loaded', { localTs, remoteTs, useRemote });
+
+        if (useRemote) {
+          applyUserData(userData);
+          // Keep localStorage in sync with the authoritative remote copy
+          writeLocalCache(userId, userData);
+        }
         setShowOnboarding(false);
-        setHasLoadedUserData(true);
-      } else {
+      } else if (!localData) {
         console.log('ℹ️ No existing user data found. Showing onboarding.');
         setCurrentDate(new Date());
         setSelectedDate(null);
         setShowOnboarding(true);
-        setHasLoadedUserData(true);
       }
+
+      setHasLoadedUserData(true);
     } catch (error) {
-      console.error('❌ Error loading user data:', error);
-      alert('Failed to load your data. Error: ' + error.message);
-      setHasLoadedUserData(false);
+      console.error('❌ Error loading from Firestore:', error);
+      if (!localData) {
+        alert('Failed to load your data. Error: ' + error.message);
+        setHasLoadedUserData(false);
+      }
+      // If we already restored from localStorage, keep going — don't block the user
     }
   };
 
-  // Save user data to Firestore
-  const saveUserDataToFirestore = async () => {
-    if (!user) {
-      console.log('❌ Cannot save: No user signed in');
-      return;
-    }
-    if (!hasLoadedUserData) {
-      console.log('⏸️ Skipping save: user data not loaded yet');
-      return;
-    }
-
-    console.log('💾 Saving user data...', {
-      userId: user.uid,
-      tasksCount: Object.values(cards).reduce((sum, col) => sum + col.length, 0),
-      rolesCount: userRoles.length,
-      hubsCount: userHubs.length
-    });
-
+  // Save user data to Firestore (cloud backup, used by debounced effect)
+  const saveUserDataToFirestore = useCallback(async (snapshot) => {
+    if (!user || !hasLoadedUserData) return;
+    const data = snapshot || buildSnapshot();
     try {
-      await saveUserData(user.uid, {
-        ruleOfThree,
-        nonPriorityTasks,
-        cards,
-        customRoles: userRoles,
-        userHubs,
-        areasOfFocus,
-        purposeOfUse,
-        activeTab,
-        selectedHub,
-        currentDate: currentDate?.toISOString ? currentDate.toISOString() : new Date().toISOString(),
-        selectedDate: selectedDate ? selectedDate.toISOString() : null,
-        lastUpdated: new Date().toISOString(),
-      });
-      console.log('✅ Data saved successfully at', new Date().toLocaleTimeString());
+      await saveUserData(user.uid, data);
+      console.log('☁️ Firestore saved at', new Date().toLocaleTimeString());
     } catch (error) {
-      console.error('❌ Error saving user data:', error);
+      console.error('❌ Firestore save error:', error);
     }
-  };
+  }, [user, hasLoadedUserData, buildSnapshot]);
 
-  // Auto-save
+  // Effect 1: Write to localStorage immediately on every state change (synchronous,
+  // survives refresh) AND update the latestDataRef used by beforeunload.
+  // Also schedules a debounced Firestore cloud save.
   useEffect(() => {
-    if (user && !showOnboarding && hasLoadedUserData) {
-      const timer = setTimeout(() => {
-        saveUserDataToFirestore();
-      }, 1000);
-      return () => clearTimeout(timer);
-    }
+    if (!user || !hasLoadedUserData || showOnboarding) return;
+
+    const snapshot = buildSnapshot();
+
+    // Synchronous local write — this is what makes refresh persistence reliable
+    latestDataRef.current = snapshot;
+    writeLocalCache(user.uid, snapshot);
+
+    // Debounced cloud save (for cross-device sync)
+    const timer = setTimeout(() => {
+      saveUserDataToFirestore(snapshot);
+    }, 1500);
+
+    return () => clearTimeout(timer);
   }, [
     ruleOfThree,
     nonPriorityTasks,
     cards,
     userRoles,
     userHubs,
-    user,
-    showOnboarding,
-    activeTab,
-    selectedHub,
-    hasLoadedUserData,
     areasOfFocus,
     purposeOfUse,
+    activeTab,
+    selectedHub,
     currentDate,
-    selectedDate
+    selectedDate,
+    user,
+    showOnboarding,
+    hasLoadedUserData,
   ]);
 
   // Keyboard shortcuts
@@ -235,31 +291,20 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyPress);
   }, []);
 
-  // Save before page unload
+  // Effect 2: On page unload, write the latest snapshot to localStorage synchronously.
+  // Async Firebase saves are unreliable here — browsers abort them before completion.
+  // localStorage is synchronous and always finishes before the page closes.
   useEffect(() => {
     const handleBeforeUnload = () => {
-      if (user && !showOnboarding && hasLoadedUserData) {
-        saveUserDataToFirestore();
+      if (user && hasLoadedUserData && latestDataRef.current) {
+        // Stamp with current time so this beats any older Firestore copy
+        const snapshot = { ...latestDataRef.current, lastUpdated: new Date().toISOString() };
+        writeLocalCache(user.uid, snapshot);
       }
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [
-    user,
-    showOnboarding,
-    hasLoadedUserData,
-    ruleOfThree,
-    nonPriorityTasks,
-    cards,
-    userRoles,
-    userHubs,
-    areasOfFocus,
-    purposeOfUse,
-    activeTab,
-    selectedHub,
-    currentDate,
-    selectedDate
-  ]);
+  }, [user, hasLoadedUserData, writeLocalCache]);
 
   // Load calendar events
   const loadCalendarEvents = async (uid) => {
@@ -290,20 +335,27 @@ function App() {
         hub: 'personal',
       }));
 
-    setUserRoles([...DEFAULT_ROLES, ...newRoles]);
+    const mergedRoles = [...DEFAULT_ROLES, ...newRoles];
+    setUserRoles(mergedRoles);
 
-    await saveUserData(user.uid, {
-      customRoles: [...DEFAULT_ROLES, ...newRoles],
+    const onboardingData = {
+      customRoles: mergedRoles,
       userHubs: DEFAULT_HUBS,
       areasOfFocus,
       purposeOfUse,
       ruleOfThree: ['', '', ''],
       nonPriorityTasks: ['', ''],
       cards: { ideas: [], inProgress: [], readyToPublish: [], done: [] },
+      activeTab: 'kanban',
+      selectedHub: 'all',
       currentDate: new Date().toISOString(),
       selectedDate: null,
       lastUpdated: new Date().toISOString(),
-    });
+    };
+
+    writeLocalCache(user.uid, onboardingData);
+    latestDataRef.current = onboardingData;
+    await saveUserData(user.uid, onboardingData);
 
     setShowOnboarding(false);
     setHasLoadedUserData(true);
@@ -320,12 +372,12 @@ function App() {
 
   const handleSignOut = async () => {
     try {
-      // Save data before signing out
       if (user) {
-        console.log('💾 Saving data before logout...');
+        // Final cloud save before leaving
         await saveUserDataToFirestore();
+        clearLocalCache(user.uid);
+        latestDataRef.current = null;
       }
-
       await signOutUser(user.uid);
       setRuleOfThree(['', '', '']);
       setNonPriorityTasks(['', '']);
