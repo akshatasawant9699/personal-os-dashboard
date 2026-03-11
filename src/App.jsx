@@ -344,16 +344,28 @@ function App() {
   };
 
   const handleSignOut = async () => {
+    if (!user) return;
+    const uid = user.uid; // capture before any async gap
+
+    // Disable the persistence effect immediately so state resets below
+    // don't accidentally overwrite localStorage with empty data.
+    setHasLoadedUserData(false);
+
     try {
-      if (user) {
-        // Final cloud save
-        if (latestDataRef.current) {
-          try { await saveUserData(user.uid, latestDataRef.current); } catch (_) {}
-        }
-        try { localStorage.removeItem(`userDataCache_${user.uid}`); } catch (_) {}
-        latestDataRef.current = null;
+      // Final cloud save using the ref (always holds latest data)
+      if (latestDataRef.current) {
+        try { await saveUserData(uid, latestDataRef.current); } catch (_) {}
       }
-      await signOutUser(user.uid);
+
+      // Clean up local storage for this user
+      try { localStorage.removeItem(`userDataCache_${uid}`); } catch (_) {}
+      latestDataRef.current = null;
+
+      // Firebase sign-out (uses captured uid, not React state)
+      await signOutUser(uid);
+
+      // Reset UI state — onAuthStateChanged will set user → null and
+      // redirect to sign-in, but we reset here for immediate feedback.
       setRuleOfThree(['', '', '']);
       setNonPriorityTasks(['', '']);
       setCards({ ideas: [], inProgress: [], readyToPublish: [], done: [] });
@@ -363,9 +375,11 @@ function App() {
       setSelectedHub('all');
       setCurrentDate(new Date());
       setSelectedDate(null);
-      setHasLoadedUserData(false);
     } catch (error) {
+      console.error('Sign-out error:', error);
       alert('Failed to sign out: ' + error.message);
+      // If sign-out failed, re-enable persistence so data isn't lost
+      setHasLoadedUserData(true);
     }
   };
 
