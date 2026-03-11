@@ -26,13 +26,11 @@ googleProvider.addScope('https://www.googleapis.com/auth/calendar.events');
 export const signInWithGoogle = async () => {
   try {
     const result = await signInWithPopup(auth, googleProvider);
-    // Get the access token for Google Calendar API
     const credential = GoogleAuthProvider.credentialFromResult(result);
     const accessToken = credential.accessToken;
 
-    // Store the access token for Calendar API calls
     if (accessToken) {
-      localStorage.setItem('google_access_token', accessToken);
+      localStorage.setItem(`google_access_token_${result.user.uid}`, accessToken);
     }
 
     return result.user;
@@ -43,10 +41,12 @@ export const signInWithGoogle = async () => {
 };
 
 // Sign out
-export const signOutUser = async () => {
+export const signOutUser = async (uid) => {
   try {
+    if (uid) {
+      localStorage.removeItem(`google_access_token_${uid}`);
+    }
     await signOut(auth);
-    localStorage.removeItem('google_access_token');
   } catch (error) {
     console.error('Error signing out:', error);
     throw error;

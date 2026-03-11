@@ -84,6 +84,7 @@ function App() {
   // Calendar state
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(null);
+  const [hasLoadedUserData, setHasLoadedUserData] = useState(false);
 
   // Authentication listener
   useEffect(() => {
@@ -92,8 +93,11 @@ function App() {
       setLoading(false);
 
       if (currentUser) {
+        setHasLoadedUserData(false);
         await loadUserDataFromFirestore(currentUser.uid);
-        loadCalendarEvents();
+        loadCalendarEvents(currentUser.uid);
+      } else {
+        setHasLoadedUserData(false);
       }
     });
 
@@ -121,21 +125,36 @@ function App() {
         setUserHubs(userData.userHubs || DEFAULT_HUBS);
         setAreasOfFocus(userData.areasOfFocus || '');
         setPurposeOfUse(userData.purposeOfUse || '');
+        setActiveTab(userData.activeTab || 'kanban');
+        setSelectedHub(userData.selectedHub || 'all');
+        const parsedCurrentDate = userData.currentDate ? new Date(userData.currentDate) : new Date();
+        setCurrentDate(isNaN(parsedCurrentDate) ? new Date() : parsedCurrentDate);
+        const parsedSelectedDate = userData.selectedDate ? new Date(userData.selectedDate) : null;
+        setSelectedDate(parsedSelectedDate && !isNaN(parsedSelectedDate) ? parsedSelectedDate : null);
         setShowOnboarding(false);
+        setHasLoadedUserData(true);
       } else {
         console.log('ℹ️ No existing user data found. Showing onboarding.');
+        setCurrentDate(new Date());
+        setSelectedDate(null);
         setShowOnboarding(true);
+        setHasLoadedUserData(true);
       }
     } catch (error) {
       console.error('❌ Error loading user data:', error);
       alert('Failed to load your data. Error: ' + error.message);
+      setHasLoadedUserData(false);
     }
   };
 
   // Save user data to Firestore
-  const saveUserDataToFirestore = async (showAlert = false) => {
+  const saveUserDataToFirestore = async () => {
     if (!user) {
       console.log('❌ Cannot save: No user signed in');
+      return;
+    }
+    if (!hasLoadedUserData) {
+      console.log('⏸️ Skipping save: user data not loaded yet');
       return;
     }
 
@@ -155,29 +174,42 @@ function App() {
         userHubs,
         areasOfFocus,
         purposeOfUse,
+        activeTab,
+        selectedHub,
+        currentDate: currentDate?.toISOString ? currentDate.toISOString() : new Date().toISOString(),
+        selectedDate: selectedDate ? selectedDate.toISOString() : null,
         lastUpdated: new Date().toISOString(),
       });
       console.log('✅ Data saved successfully at', new Date().toLocaleTimeString());
-      if (showAlert) {
-        alert('✅ Data saved successfully!');
-      }
     } catch (error) {
       console.error('❌ Error saving user data:', error);
-      if (showAlert) {
-        alert('❌ Failed to save data: ' + error.message);
-      }
     }
   };
 
   // Auto-save
   useEffect(() => {
-    if (user && !showOnboarding) {
+    if (user && !showOnboarding && hasLoadedUserData) {
       const timer = setTimeout(() => {
         saveUserDataToFirestore();
       }, 1000);
       return () => clearTimeout(timer);
     }
-  }, [ruleOfThree, nonPriorityTasks, cards, userRoles, userHubs, user, showOnboarding]);
+  }, [
+    ruleOfThree,
+    nonPriorityTasks,
+    cards,
+    userRoles,
+    userHubs,
+    user,
+    showOnboarding,
+    activeTab,
+    selectedHub,
+    hasLoadedUserData,
+    areasOfFocus,
+    purposeOfUse,
+    currentDate,
+    selectedDate
+  ]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -203,9 +235,36 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyPress);
   }, []);
 
+  // Save before page unload
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (user && !showOnboarding && hasLoadedUserData) {
+        saveUserDataToFirestore();
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [
+    user,
+    showOnboarding,
+    hasLoadedUserData,
+    ruleOfThree,
+    nonPriorityTasks,
+    cards,
+    userRoles,
+    userHubs,
+    areasOfFocus,
+    purposeOfUse,
+    activeTab,
+    selectedHub,
+    currentDate,
+    selectedDate
+  ]);
+
   // Load calendar events
-  const loadCalendarEvents = async () => {
-    const accessToken = localStorage.getItem('google_access_token');
+  const loadCalendarEvents = async (uid) => {
+    if (!uid) return;
+    const accessToken = localStorage.getItem(`google_access_token_${uid}`);
     if (accessToken) {
       try {
         const events = await getCalendarEvents(accessToken);
@@ -241,10 +300,13 @@ function App() {
       ruleOfThree: ['', '', ''],
       nonPriorityTasks: ['', ''],
       cards: { ideas: [], inProgress: [], readyToPublish: [], done: [] },
+      currentDate: new Date().toISOString(),
+      selectedDate: null,
       lastUpdated: new Date().toISOString(),
     });
 
     setShowOnboarding(false);
+    setHasLoadedUserData(true);
   };
 
   // Sign in/out
@@ -258,12 +320,23 @@ function App() {
 
   const handleSignOut = async () => {
     try {
-      await signOutUser();
+      // Save data before signing out
+      if (user) {
+        console.log('💾 Saving data before logout...');
+        await saveUserDataToFirestore();
+      }
+
+      await signOutUser(user.uid);
       setRuleOfThree(['', '', '']);
       setNonPriorityTasks(['', '']);
       setCards({ ideas: [], inProgress: [], readyToPublish: [], done: [] });
       setUserRoles(DEFAULT_ROLES);
       setUserHubs(DEFAULT_HUBS);
+      setActiveTab('kanban');
+      setSelectedHub('all');
+      setCurrentDate(new Date());
+      setSelectedDate(null);
+      setHasLoadedUserData(false);
     } catch (error) {
       alert('Failed to sign out: ' + error.message);
     }
@@ -422,7 +495,7 @@ function App() {
   };
 
   const handleSyncToCalendar = async () => {
-    const accessToken = localStorage.getItem('google_access_token');
+    const accessToken = localStorage.getItem(`google_access_token_${user.uid}`);
     if (!accessToken) {
       alert('Please sign out and sign in again to refresh your Google Calendar access.');
       return;
@@ -442,7 +515,7 @@ function App() {
       }));
       const result = await syncTasksToCalendar(accessToken, tasksData);
       alert(`Synced ${result.syncedTasks.length} tasks! ✅`);
-      loadCalendarEvents();
+      loadCalendarEvents(user.uid);
     } catch (error) {
       alert('Failed to sync. Please try signing in again.');
     }
@@ -782,13 +855,6 @@ function App() {
             </div>
 
             <div className="flex items-center gap-2 sm:gap-4">
-              <button
-                onClick={() => saveUserDataToFirestore(true)}
-                className="px-3 sm:px-4 py-2 bg-gradient-to-r from-green-400 to-emerald-400 hover:from-green-500 hover:to-emerald-500 text-white rounded-xl flex items-center gap-2 transition-all transform hover:scale-105 shadow-md text-sm"
-                title="Save data now"
-              >
-                💾 Save
-              </button>
               <button
                 onClick={handleSyncToCalendar}
                 className="px-3 sm:px-4 py-2 bg-gradient-to-r from-blue-400 to-cyan-400 hover:from-blue-500 hover:to-cyan-500 text-white rounded-xl flex items-center gap-2 transition-all transform hover:scale-105 shadow-md text-sm"
