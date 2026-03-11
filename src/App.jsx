@@ -64,6 +64,8 @@ function App() {
   const [showHubManager, setShowHubManager] = useState(false);
   const [editingHub, setEditingHub] = useState(null);
 
+  const [signingOut, setSigningOut] = useState(false);
+
   // App state
   const [ruleOfThree, setRuleOfThree] = useState(['', '', '']);
   const [nonPriorityTasks, setNonPriorityTasks] = useState(['', '']);
@@ -344,28 +346,30 @@ function App() {
   };
 
   const handleSignOut = async () => {
-    if (!user) return;
-    const uid = user.uid; // capture before any async gap
+    if (!user || signingOut) return;
+    const uid = user.uid;
 
-    // Disable the persistence effect immediately so state resets below
-    // don't accidentally overwrite localStorage with empty data.
+    setSigningOut(true);
+    // Disable persistence effect so state resets below don't overwrite localStorage
     setHasLoadedUserData(false);
 
     try {
-      // Final cloud save using the ref (always holds latest data)
+      // Best-effort final Firestore save — give it 3 s max so we don't hang
       if (latestDataRef.current) {
-        try { await saveUserData(uid, latestDataRef.current); } catch (_) {}
+        await Promise.race([
+          saveUserData(uid, latestDataRef.current),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000)),
+        ]).catch(() => {});
       }
 
-      // Clean up local storage for this user
+      // Remove local cache and Calendar access token
       try { localStorage.removeItem(`userDataCache_${uid}`); } catch (_) {}
       latestDataRef.current = null;
 
-      // Firebase sign-out (uses captured uid, not React state)
+      // Firebase sign-out
       await signOutUser(uid);
 
-      // Reset UI state — onAuthStateChanged will set user → null and
-      // redirect to sign-in, but we reset here for immediate feedback.
+      // Reset all local state for immediate UI feedback
       setRuleOfThree(['', '', '']);
       setNonPriorityTasks(['', '']);
       setCards({ ideas: [], inProgress: [], readyToPublish: [], done: [] });
@@ -378,8 +382,9 @@ function App() {
     } catch (error) {
       console.error('Sign-out error:', error);
       alert('Failed to sign out: ' + error.message);
-      // If sign-out failed, re-enable persistence so data isn't lost
       setHasLoadedUserData(true);
+    } finally {
+      setSigningOut(false);
     }
   };
 
@@ -538,27 +543,66 @@ function App() {
   const handleSyncToCalendar = async () => {
     const accessToken = localStorage.getItem(`google_access_token_${user.uid}`);
     if (!accessToken) {
-      alert('Please sign out and sign in again to refresh your Google Calendar access.');
+      alert('Your Google Calendar access has expired.\nPlease sign out and sign in again to reconnect.');
       return;
     }
-    const tasksToSync = cards.readyToPublish;
-    if (tasksToSync.length === 0) {
-      alert('No tasks in "Ready" column to sync!');
+
+    // Collect ALL tasks that have a due date (any column)
+    const allTasks = [
+      ...cards.ideas,
+      ...cards.inProgress,
+      ...cards.readyToPublish,
+      ...cards.done,
+    ];
+    const tasksWithDate = allTasks.filter((card) => card.dueDate);
+    const skipped = allTasks.length - tasksWithDate.length;
+
+    if (tasksWithDate.length === 0) {
+      alert('No tasks have a due date set.\nAdd a due date to a task on the board first, then sync.');
       return;
     }
+
     try {
-      const tasksData = tasksToSync.map((card) => ({
-        id: card.id,
-        title: card.title,
-        description: `Roles: ${card.roles.map((r) => userRoles.find((role) => role.id === r)?.label).join(', ')}`,
-        startTime: new Date().toISOString(),
-        endTime: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-      }));
+      const tasksData = tasksWithDate.map((card) => {
+        // Use the card's dueDate as the event start; make it an all-day event
+        const dateStr = card.dueDate; // "YYYY-MM-DD"
+        const start = new Date(`${dateStr}T09:00:00`);
+        const end = new Date(`${dateStr}T10:00:00`);
+        const roleLabels = card.roles
+          .map((r) => userRoles.find((role) => role.id === r)?.label)
+          .filter(Boolean)
+          .join(', ');
+        return {
+          id: card.id,
+          title: card.title,
+          description: [
+            card.description,
+            roleLabels ? `Roles: ${roleLabels}` : '',
+            `Status: ${Object.entries(cards).find(([, col]) => col.some((c) => c.id === card.id))?.[0] ?? ''}`,
+          ].filter(Boolean).join('\n'),
+          startTime: start.toISOString(),
+          endTime: end.toISOString(),
+        };
+      });
+
       const result = await syncTasksToCalendar(accessToken, tasksData);
-      alert(`Synced ${result.syncedTasks.length} tasks! ✅`);
+      const msg = [
+        `Synced ${result.syncedTasks.length} task(s) to Google Calendar.`,
+        result.failedTasks.length ? `${result.failedTasks.length} failed.` : '',
+        skipped ? `${skipped} task(s) skipped (no due date).` : '',
+      ].filter(Boolean).join('\n');
+      alert(msg);
       loadCalendarEvents(user.uid);
     } catch (error) {
-      alert('Failed to sync. Please try signing in again.');
+      const isAuthError = error.message?.toLowerCase().includes('401')
+        || error.message?.toLowerCase().includes('403')
+        || error.message?.toLowerCase().includes('unauthorized')
+        || error.message?.toLowerCase().includes('access token');
+      if (isAuthError) {
+        alert('Your Google Calendar access token has expired.\nPlease sign out and sign in again to re-authorise.');
+      } else {
+        alert(`Sync failed: ${error.message}\n\nIf this keeps happening, try signing out and back in.`);
+      }
     }
   };
 
@@ -916,10 +960,14 @@ function App() {
               </div>
               <button
                 onClick={handleSignOut}
-                className="p-2 hover:bg-gray-100 rounded-md transition-colors"
-                title="Sign Out"
+                disabled={signingOut}
+                className={`p-2 rounded-md transition-colors ${signingOut ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-100'}`}
+                title={signingOut ? 'Signing out…' : 'Sign Out'}
               >
-                <LogOut size={18} className="text-gray-600" />
+                {signingOut
+                  ? <div className="w-[18px] h-[18px] border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+                  : <LogOut size={18} className="text-gray-600" />
+                }
               </button>
             </div>
           </div>

@@ -23,7 +23,9 @@ export const getCalendarEvents = async (accessToken, timeMin, timeMax) => {
     });
 
     if (!response.ok) {
-      throw new Error('Failed to fetch calendar events');
+      const body = await response.json().catch(() => ({}));
+      const msg = body?.error?.message || response.statusText || 'unknown error';
+      throw new Error(`${response.status}: ${msg}`);
     }
 
     const data = await response.json();
@@ -62,7 +64,9 @@ export const createCalendarEvent = async (accessToken, task) => {
     });
 
     if (!response.ok) {
-      throw new Error('Failed to create calendar event');
+      const body = await response.json().catch(() => ({}));
+      const msg = body?.error?.message || response.statusText || 'unknown error';
+      throw new Error(`${response.status}: ${msg}`);
     }
 
     const data = await response.json();
