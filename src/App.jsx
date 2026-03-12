@@ -564,10 +564,9 @@ function App() {
 
     try {
       const tasksData = tasksWithDate.map((card) => {
-        // Use the card's dueDate as the event start; make it an all-day event
-        const dateStr = card.dueDate; // "YYYY-MM-DD"
-        const start = new Date(`${dateStr}T09:00:00`);
-        const end = new Date(`${dateStr}T10:00:00`);
+        // Use the card's dueDate as the event start (local time, 9–10 AM)
+        const start = new Date(`${card.dueDate}T09:00:00`);
+        const end = new Date(`${card.dueDate}T10:00:00`);
         const roleLabels = card.roles
           .map((r) => userRoles.find((role) => role.id === r)?.label)
           .filter(Boolean)
@@ -721,13 +720,22 @@ function App() {
     return date1.toDateString() === date2.toDateString();
   };
 
+  // Parse a "YYYY-MM-DD" date string as LOCAL midnight so it matches the calendar
+  // grid dates (which are also local midnight). Without the T00:00:00 suffix the
+  // browser treats the string as UTC, shifting the date by the timezone offset.
+  const parseDueDate = (dueDateStr) => {
+    if (!dueDateStr) return null;
+    const d = new Date(`${dueDateStr}T00:00:00`);
+    return isNaN(d) ? null : d;
+  };
+
   const getTasksForDate = (date) => {
     if (!date) return [];
     const allCards = [...cards.ideas, ...cards.inProgress, ...cards.readyToPublish, ...cards.done];
     return allCards.filter(card => {
       if (!card.dueDate) return false;
-      const cardDate = new Date(card.dueDate);
-      return isSameDay(cardDate, date);
+      const cardDate = parseDueDate(card.dueDate);
+      return cardDate && isSameDay(cardDate, date);
     });
   };
 
@@ -1342,23 +1350,44 @@ function App() {
                   <div
                     key={index}
                     onClick={() => date && setSelectedDate(date)}
-                    className={`min-h-[100px] border border-gray-200 rounded-lg p-2 cursor-pointer transition-colors ${
-                      !date ? 'bg-gray-50' : isSelected ? 'bg-blue-50 border-blue-300' : isToday ? 'bg-gray-100' : 'hover:bg-gray-50'
+                    className={`min-h-[100px] border rounded-lg p-2 cursor-pointer transition-colors ${
+                      !date
+                        ? 'bg-gray-50 border-gray-100'
+                        : isSelected
+                          ? 'bg-orange-50 border-orange-300'
+                          : isToday
+                            ? 'bg-amber-50 border-amber-300'
+                            : tasksForDay.length > 0
+                              ? 'bg-white border-gray-300 hover:border-orange-200'
+                              : 'bg-white border-gray-200 hover:bg-gray-50'
                     }`}
                   >
                     {date && (
                       <>
-                        <div className={`text-sm font-medium mb-1 ${isToday ? 'text-blue-600' : 'text-gray-700'}`}>
+                        <div className={`text-sm font-semibold mb-1 w-6 h-6 flex items-center justify-center rounded-full ${
+                          isToday ? 'bg-orange-500 text-white' : 'text-gray-700'
+                        }`}>
                           {date.getDate()}
                         </div>
-                        <div className="space-y-1">
+                        <div className="space-y-0.5">
                           {tasksForDay.slice(0, 3).map(task => (
-                            <div key={task.id} className="text-xs bg-gray-200 rounded px-1.5 py-0.5 truncate">
+                            <div
+                              key={task.id}
+                              className={`text-xs rounded px-1.5 py-0.5 truncate font-medium ${
+                                task.priority === 'high'
+                                  ? 'bg-red-100 text-red-700'
+                                  : task.priority === 'low'
+                                    ? 'bg-gray-100 text-gray-600'
+                                    : 'bg-blue-100 text-blue-700'
+                              }`}
+                            >
                               {task.title}
                             </div>
                           ))}
                           {tasksForDay.length > 3 && (
-                            <div className="text-xs text-gray-500">+{tasksForDay.length - 3} more</div>
+                            <div className="text-xs text-orange-500 font-medium">
+                              +{tasksForDay.length - 3} more
+                            </div>
                           )}
                         </div>
                       </>
@@ -1371,20 +1400,40 @@ function App() {
             {selectedDate && (
               <div className="mt-6 p-4 bg-gray-50 rounded-lg">
                 <h3 className="text-sm font-semibold text-gray-900 mb-3">
-                  Tasks for {selectedDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}
+                  Tasks for {selectedDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
                 </h3>
                 <div className="space-y-2">
                   {getTasksForDate(selectedDate).length > 0 ? (
-                    getTasksForDate(selectedDate).map(task => (
-                      <div key={task.id} className="bg-white border border-gray-200 rounded p-3">
-                        <div className="font-medium text-sm">{task.title}</div>
-                        {task.description && (
-                          <div className="text-xs text-gray-600 mt-1">{task.description}</div>
-                        )}
-                      </div>
-                    ))
+                    getTasksForDate(selectedDate).map(task => {
+                      const col = Object.entries(cards).find(([, col]) => col.some(c => c.id === task.id))?.[0];
+                      const colLabel = { ideas: 'Ideas', inProgress: 'In Progress', readyToPublish: 'Ready', done: 'Done' }[col] ?? '';
+                      const roleLabels = (task.roles || [])
+                        .map(r => userRoles.find(role => role.id === r)?.label)
+                        .filter(Boolean);
+                      return (
+                        <div key={task.id} className="bg-white border border-gray-200 rounded p-3 flex items-start gap-3">
+                          <div className={`mt-1 w-2 h-2 rounded-full flex-shrink-0 ${
+                            task.priority === 'high' ? 'bg-red-500' : task.priority === 'low' ? 'bg-gray-400' : 'bg-yellow-400'
+                          }`} />
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-sm text-gray-900">{task.title}</div>
+                            {task.description && (
+                              <div className="text-xs text-gray-500 mt-0.5 truncate">{task.description}</div>
+                            )}
+                            <div className="flex items-center gap-2 mt-1 flex-wrap">
+                              {colLabel && (
+                                <span className="text-xs bg-gray-100 text-gray-600 rounded px-1.5 py-0.5">{colLabel}</span>
+                              )}
+                              {roleLabels.map(label => (
+                                <span key={label} className="text-xs bg-orange-50 text-orange-700 rounded px-1.5 py-0.5">{label}</span>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
                   ) : (
-                    <div className="text-sm text-gray-500">No tasks scheduled for this day</div>
+                    <div className="text-sm text-gray-500">No tasks scheduled for this day.</div>
                   )}
                 </div>
               </div>
