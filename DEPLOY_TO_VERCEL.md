@@ -1,6 +1,6 @@
 # Deploy to Vercel - Step-by-Step Guide
 
-This guide will help you deploy your Personal OS Dashboard to Vercel in just a few minutes!
+This guide will help you deploy your Personal Kanban Dashboard to Vercel in just a few minutes!
 
 ## Prerequisites
 
@@ -197,7 +197,7 @@ vercel --prod
 
 ## Next Steps
 
-✅ Your Personal OS is now live and accessible to anyone!
+✅ Your Personal Kanban is now live and accessible to anyone!
 
 **Share your app**:
 - Post on LinkedIn
@@ -234,7 +234,7 @@ Having issues?
 
 ---
 
-🎉 **Congratulations! Your Personal OS is live!** 🎉
+🎉 **Congratulations! Your Personal Kanban is live!** 🎉
 
 Your live URL: https://personal-os-dashboard.vercel.app (update after deployment)
 

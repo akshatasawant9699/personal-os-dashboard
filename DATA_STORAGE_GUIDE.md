@@ -1,7 +1,7 @@
-# 📊 Data Storage Guide - Personal OS
+# 📊 Data Storage Guide - Personal Kanban
 
 ## Overview
-Your Personal OS uses **Firebase Firestore** (cloud database) to store all your data securely.
+Your Personal Kanban uses **Firebase Firestore** (cloud database) to store all your data securely.
 
 ---
 
@@ -258,7 +258,7 @@ Don't worry about costs! Firebase has a generous free tier:
 - ✅ **20,000 writes** per day
 - ✅ **20,000 deletes** per day
 
-### Typical Usage (Personal OS):
+### Typical Usage (Personal Kanban):
 - **Storage:** ~1-5 MB (you'd need 200+ years to hit 1GB!)
 - **Reads:** ~50-100 per day (well under 50,000)
 - **Writes:** ~20-50 per day (well under 20,000)

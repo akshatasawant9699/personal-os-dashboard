@@ -1,6 +1,6 @@
 # Quick Setup Guide
 
-Follow these steps to get your Personal OS up and running in minutes!
+Follow these steps to get your Personal Kanban up and running in minutes!
 
 ## Step 1: Install Node.js
 
@@ -73,7 +73,7 @@ This will install all required packages including:
 1. Click the gear icon → "Project settings"
 2. Scroll to "Your apps"
 3. Click the web icon (`</>`)
-4. Register app name: "Personal OS Web"
+4. Register app name: "Personal Kanban Web"
 5. Don't check Firebase Hosting
 6. Click "Register app"
 7. Copy the `firebaseConfig` object values
@@ -94,14 +94,14 @@ This will install all required packages including:
 2. Click "Create Credentials" → "OAuth client ID"
 3. If prompted, configure OAuth consent screen:
    - User Type: External
-   - App name: "Personal OS"
+   - App name: "Personal Kanban"
    - Support email: your email
    - Add scopes: Select "Google Calendar API" scopes
    - Add test users: your email
    - Click "Save and Continue"
 4. Create OAuth client ID:
    - Application type: "Web application"
-   - Name: "Personal OS Web Client"
+   - Name: "Personal Kanban Web Client"
    - Authorized JavaScript origins:
      - `http://localhost:5173` (development)
      - Your production URL (after deployment)
@@ -213,4 +213,4 @@ Some ideas:
 
 ---
 
-Enjoy your Personal OS!
+Enjoy your Personal Kanban!

@@ -1,4 +1,4 @@
-# Product Requirements Document — Personal OS
+# Product Requirements Document — Personal Kanban
 
 **Version:** 1.0
 **Date:** March 2026
@@ -16,7 +16,7 @@ Professionals and creators who operate across multiple roles — developer, cont
 
 ### 1.2 Product Vision
 
-Personal OS is a personal productivity dashboard for multi-role individuals. It combines daily intention-setting (Rule of Three), a Kanban board, calendar view, and analytics into one authenticated, cloud-persisted web app. It is intentionally single-user and opinionated — a personal operating system, not a team tool.
+Personal Kanban is a personal productivity dashboard for multi-role individuals. It combines daily intention-setting (Rule of Three), a Kanban board, calendar view, and analytics into one authenticated, cloud-persisted web app. It is intentionally single-user and opinionated — a personal operating system, not a team tool.
 
 ### 1.3 Target Users
 

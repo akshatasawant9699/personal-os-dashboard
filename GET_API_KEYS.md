@@ -1,6 +1,6 @@
 # How to Get All API Keys and Environment Variables
 
-This guide will walk you through getting ALL the environment variables you need for your Personal OS app.
+This guide will walk you through getting ALL the environment variables you need for your Personal Kanban app.
 
 **Time needed**: ~15 minutes total
 
@@ -36,7 +36,7 @@ This guide will walk you through getting ALL the environment variables you need 
    - Click the **Web icon** (`</>` symbol)
 
 2. **Register App**
-   - App nickname: `Personal OS Web`
+   - App nickname: `Personal Kanban Web`
    - ❌ Don't check "Also set up Firebase Hosting"
    - Click **"Register app"**
 
@@ -139,7 +139,7 @@ Now you have these values from the `firebaseConfig`:
    - Proceed to step 3 below
 
 3. **Fill Out App Information** (OAuth consent screen - Edit app registration)
-   - **App name**: `Personal OS`
+   - **App name**: `Personal Kanban`
    - **User support email**: Select your email from dropdown
    - **App logo**: Skip (optional - you can leave this empty)
    - **App domain** section:
@@ -194,7 +194,7 @@ Now you have these values from the `firebaseConfig`:
 
 3. **Choose Application Type**
    - Application type: Select **"Web application"** from the dropdown
-   - Name: `Personal OS Web Client` (or any name you prefer)
+   - Name: `Personal Kanban Web Client` (or any name you prefer)
 
 4. **Add Authorized JavaScript Origins**
    - Under "Authorized JavaScript origins"
@@ -227,7 +227,7 @@ Now you have these values from the `firebaseConfig`:
 | `VITE_GOOGLE_CLIENT_ID` | `123-abc.apps.googleusercontent.com` | _____________ |
 
 **Where to find it later?**
-- Google Cloud Console → APIs & Services → Credentials → Look for "Personal OS Web Client"
+- Google Cloud Console → APIs & Services → Credentials → Look for "Personal Kanban Web Client"
 
 ---
 
@@ -281,7 +281,7 @@ Now create a file called `.env` in your project root:
 
 3. **Open the app**
    - Go to: http://localhost:5173
-   - You should see the Personal OS landing page
+   - You should see the Personal Kanban landing page
 
 4. **Test Sign In**
    - Click "Sign in with Google"
@@ -365,7 +365,7 @@ Now create a file called `.env` in your project root:
 **Solution**: This is completely NORMAL for apps in development/testing mode! Here's how to proceed:
 
 1. **Click "Advanced"** at the bottom of the warning screen
-2. **Click "Go to Personal OS (unsafe)"** - Don't worry, your own app is safe!
+2. **Click "Go to Personal Kanban (unsafe)"** - Don't worry, your own app is safe!
 3. **Grant permissions** - Allow access to Calendar and profile
 
 **Why this happens:**
@@ -418,7 +418,7 @@ Now create a file called `.env` in your project root:
 2. Select your project
 3. Go to "APIs & Services" → "Credentials"
 4. Look for "OAuth 2.0 Client IDs" section
-5. Find "Personal OS Web Client"
+5. Find "Personal Kanban Web Client"
 6. Click on it to see the Client ID
 
 ---
