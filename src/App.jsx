@@ -784,7 +784,7 @@ function App() {
           <div className="space-y-4">
             <div className="text-6xl animate-float">☀️</div>
             <h1 className="text-6xl font-bold gradient-summer">
-              Personal OS
+              Personal Kanban
             </h1>
             <p className="text-2xl text-gray-700 font-light">Daily Productivity App</p>
           </div>
@@ -933,7 +933,7 @@ function App() {
             <div className="flex items-center gap-2 sm:gap-3">
               <div className="text-3xl animate-float">☀️</div>
               <h1 className="text-lg sm:text-2xl font-bold gradient-summer">
-                Personal OS
+                Personal Kanban
               </h1>
             </div>
 
