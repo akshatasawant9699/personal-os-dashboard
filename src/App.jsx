@@ -27,7 +27,7 @@ import {
   StickyNote,
   BookOpen,
 } from 'lucide-react';
-import { auth, signInWithGoogle, signOutUser, getUserData, saveUserData } from './firebase';
+import { auth, signInWithGoogle, signOutUser, getUserData, saveUserData, authoriseCalendar } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { getCalendarEvents, syncTasksToCalendar } from './utils/calendar';
 import Dashboard from './components/Dashboard';
@@ -568,10 +568,20 @@ function App() {
   };
 
   const handleSyncToCalendar = async () => {
-    const accessToken = localStorage.getItem(`google_access_token_${user.uid}`);
+    let accessToken = localStorage.getItem(`google_access_token_${user.uid}`);
+
+    // If no Calendar token, request Calendar access now (separate consent prompt)
     if (!accessToken) {
-      alert('Your Google Calendar access has expired.\nPlease sign out and sign in again to reconnect.');
-      return;
+      try {
+        accessToken = await authoriseCalendar();
+        if (!accessToken) {
+          alert('Calendar authorisation was cancelled.');
+          return;
+        }
+      } catch (error) {
+        alert('Could not connect to Google Calendar.\nPlease try again.');
+        return;
+      }
     }
 
     // Collect ALL tasks that have a due date (any column)
@@ -625,9 +635,11 @@ function App() {
         || error.message?.toLowerCase().includes('unauthorized')
         || error.message?.toLowerCase().includes('access token');
       if (isAuthError) {
-        alert('Your Google Calendar access token has expired.\nPlease sign out and sign in again to re-authorise.');
+        // Token expired — clear it and retry with fresh authorisation
+        try { localStorage.removeItem(`google_access_token_${user.uid}`); } catch (_) {}
+        alert('Your Calendar access expired. Click Sync again to re-authorise.');
       } else {
-        alert(`Sync failed: ${error.message}\n\nIf this keeps happening, try signing out and back in.`);
+        alert(`Sync failed: ${error.message}`);
       }
     }
   };

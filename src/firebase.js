@@ -2,7 +2,6 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
 import { getFirestore, doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 
-// Firebase configuration
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
@@ -12,32 +11,40 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
-// Initialize Firebase
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
+
+// Basic provider — no sensitive scopes, no "unverified app" warning
 export const googleProvider = new GoogleAuthProvider();
 
-// Add Google Calendar scope
-googleProvider.addScope('https://www.googleapis.com/auth/calendar');
-googleProvider.addScope('https://www.googleapis.com/auth/calendar.events');
-
-// Sign in with Google
+// Sign in with Google (basic profile only — no Calendar scopes)
 export const signInWithGoogle = async () => {
   try {
     const result = await signInWithPopup(auth, googleProvider);
-    const credential = GoogleAuthProvider.credentialFromResult(result);
-    const accessToken = credential.accessToken;
-
-    if (accessToken) {
-      localStorage.setItem(`google_access_token_${result.user.uid}`, accessToken);
-    }
-
     return result.user;
   } catch (error) {
     console.error('Error signing in with Google:', error);
     throw error;
   }
+};
+
+// Separate Calendar authorisation — only triggered when user clicks "Sync"
+// This uses a new provider instance with Calendar scopes so the consent
+// screen only appears when the user actually wants Calendar access.
+export const authoriseCalendar = async () => {
+  const calendarProvider = new GoogleAuthProvider();
+  calendarProvider.addScope('https://www.googleapis.com/auth/calendar');
+  calendarProvider.addScope('https://www.googleapis.com/auth/calendar.events');
+
+  const result = await signInWithPopup(auth, calendarProvider);
+  const credential = GoogleAuthProvider.credentialFromResult(result);
+  const accessToken = credential?.accessToken;
+
+  if (accessToken && result.user) {
+    localStorage.setItem(`google_access_token_${result.user.uid}`, accessToken);
+  }
+  return accessToken;
 };
 
 // Sign out
