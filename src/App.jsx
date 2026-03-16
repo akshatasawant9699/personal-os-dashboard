@@ -462,7 +462,6 @@ function App() {
 
     setRuleOfThree(['', '', '']);
     setNonPriorityTasks(['', '']);
-    alert(`Added ${tasksToAdd.length} task(s) to the board! ✅`);
   };
 
   const triggerOnboarding = () => {
