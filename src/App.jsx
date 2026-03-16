@@ -23,10 +23,17 @@ import {
   ChevronLeft,
   ChevronRight,
   Folder,
+  Home,
+  StickyNote,
+  BookOpen,
 } from 'lucide-react';
 import { auth, signInWithGoogle, signOutUser, getUserData, saveUserData } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { getCalendarEvents, syncTasksToCalendar } from './utils/calendar';
+import Dashboard from './components/Dashboard';
+import FocusTimer from './components/FocusTimer';
+import Notes from './components/Notes';
+import Journal from './components/Journal';
 
 const DEFAULT_ROLES = [
   { id: 'work', label: 'Work', color: 'bg-blue-500', hub: 'career' },
@@ -53,7 +60,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [onboardingStep, setOnboardingStep] = useState(0);
-  const [activeTab, setActiveTab] = useState('kanban'); // 'kanban', 'calendar', 'analytics'
+  const [activeTab, setActiveTab] = useState('dashboard');
 
   // User settings
   const [userRoles, setUserRoles] = useState(DEFAULT_ROLES);
@@ -88,6 +95,11 @@ function App() {
   const [selectedDate, setSelectedDate] = useState(null);
   const [hasLoadedUserData, setHasLoadedUserData] = useState(false);
 
+  // New feature state
+  const [notes, setNotes] = useState([]);
+  const [journal, setJournal] = useState([]);
+  const [focusStats, setFocusStats] = useState({ totalSessions: 0, totalMinutes: 0, lastSession: null });
+
   // Always-current ref — written synchronously before every Firestore round-trip
   const latestDataRef = useRef(null);
 
@@ -100,12 +112,15 @@ function App() {
     setUserHubs(data.userHubs || DEFAULT_HUBS);
     setAreasOfFocus(data.areasOfFocus || '');
     setPurposeOfUse(data.purposeOfUse || '');
-    setActiveTab(data.activeTab || 'kanban');
+    setActiveTab(data.activeTab || 'dashboard');
     setSelectedHub(data.selectedHub || 'all');
     const pd = data.currentDate ? new Date(data.currentDate) : new Date();
     setCurrentDate(!isNaN(pd) ? pd : new Date());
     const psd = data.selectedDate ? new Date(data.selectedDate) : null;
     setSelectedDate(psd && !isNaN(psd) ? psd : null);
+    setNotes(data.notes || []);
+    setJournal(data.journal || []);
+    setFocusStats(data.focusStats || { totalSessions: 0, totalMinutes: 0, lastSession: null });
   };
 
   // Authentication listener
@@ -200,6 +215,9 @@ function App() {
         ? currentDate.toISOString() : new Date().toISOString(),
       selectedDate: selectedDate instanceof Date && !isNaN(selectedDate)
         ? selectedDate.toISOString() : null,
+      notes,
+      journal,
+      focusStats,
       lastUpdated: new Date().toISOString(),
     };
 
@@ -236,6 +254,9 @@ function App() {
     selectedHub,
     currentDate,
     selectedDate,
+    notes,
+    journal,
+    focusStats,
     user,
     showOnboarding,
     hasLoadedUserData,
@@ -321,10 +342,13 @@ function App() {
       ruleOfThree: ['', '', ''],
       nonPriorityTasks: ['', ''],
       cards: { ideas: [], inProgress: [], readyToPublish: [], done: [] },
-      activeTab: 'kanban',
+      activeTab: 'dashboard',
       selectedHub: 'all',
       currentDate: new Date().toISOString(),
       selectedDate: null,
+      notes: [],
+      journal: [],
+      focusStats: { totalSessions: 0, totalMinutes: 0, lastSession: null },
       lastUpdated: new Date().toISOString(),
     };
 
@@ -375,10 +399,13 @@ function App() {
       setCards({ ideas: [], inProgress: [], readyToPublish: [], done: [] });
       setUserRoles(DEFAULT_ROLES);
       setUserHubs(DEFAULT_HUBS);
-      setActiveTab('kanban');
+      setActiveTab('dashboard');
       setSelectedHub('all');
       setCurrentDate(new Date());
       setSelectedDate(null);
+      setNotes([]);
+      setJournal([]);
+      setFocusStats({ totalSessions: 0, totalMinutes: 0, lastSession: null });
     } catch (error) {
       console.error('Sign-out error:', error);
       alert('Failed to sign out: ' + error.message);
@@ -911,40 +938,29 @@ function App() {
             </div>
 
             {/* Tab Navigation */}
-            <div className="flex items-center gap-2 bg-orange-100/50 rounded-xl p-1">
-              <button
-                onClick={() => setActiveTab('kanban')}
-                className={`px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 ${
-                  activeTab === 'kanban'
-                    ? 'bg-white text-orange-600 shadow-md'
-                    : 'text-gray-600 hover:text-orange-600'
-                }`}
-              >
-                <LayoutGrid size={18} />
-                <span className="hidden sm:inline">Board</span>
-              </button>
-              <button
-                onClick={() => setActiveTab('calendar')}
-                className={`px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 ${
-                  activeTab === 'calendar'
-                    ? 'bg-white text-orange-600 shadow-md'
-                    : 'text-gray-600 hover:text-orange-600'
-                }`}
-              >
-                <CalendarIcon size={18} />
-                <span className="hidden sm:inline">Calendar</span>
-              </button>
-              <button
-                onClick={() => setActiveTab('analytics')}
-                className={`px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 ${
-                  activeTab === 'analytics'
-                    ? 'bg-white text-orange-600 shadow-md'
-                    : 'text-gray-600 hover:text-orange-600'
-                }`}
-              >
-                <BarChart3 size={18} />
-                <span className="hidden sm:inline">Analytics</span>
-              </button>
+            <div className="flex items-center gap-1 bg-orange-100/50 rounded-xl p-1 overflow-x-auto">
+              {[
+                { id: 'dashboard', label: 'Home', icon: Home },
+                { id: 'kanban', label: 'Board', icon: LayoutGrid },
+                { id: 'calendar', label: 'Calendar', icon: CalendarIcon },
+                { id: 'focus', label: 'Focus', icon: Clock },
+                { id: 'notes', label: 'Notes', icon: StickyNote },
+                { id: 'journal', label: 'Journal', icon: BookOpen },
+                { id: 'analytics', label: 'Analytics', icon: BarChart3 },
+              ].map(({ id, label, icon: Icon }) => (
+                <button
+                  key={id}
+                  onClick={() => setActiveTab(id)}
+                  className={`px-3 py-2 rounded-lg font-medium transition-all flex items-center gap-1.5 text-sm whitespace-nowrap ${
+                    activeTab === id
+                      ? 'bg-white text-orange-600 shadow-md'
+                      : 'text-gray-600 hover:text-orange-600'
+                  }`}
+                >
+                  <Icon size={16} />
+                  <span className="hidden lg:inline">{label}</span>
+                </button>
+              ))}
             </div>
 
             <div className="flex items-center gap-2 sm:gap-4">
@@ -983,6 +999,17 @@ function App() {
       </header>
 
       <div className="max-w-7xl mx-auto px-6 py-6 space-y-6">
+        {activeTab === 'dashboard' && (
+          <Dashboard
+            cards={cards}
+            ruleOfThree={ruleOfThree}
+            notes={notes}
+            journal={journal}
+            focusStats={focusStats}
+            onNavigate={setActiveTab}
+          />
+        )}
+
         {activeTab === 'kanban' && (
           <>
             {/* Search */}
@@ -1568,6 +1595,21 @@ function App() {
               </div>
             </div>
           </div>
+        )}
+
+        {activeTab === 'focus' && (
+          <FocusTimer
+            focusStats={focusStats}
+            onUpdateStats={(newStats) => setFocusStats(prev => ({ ...prev, ...newStats }))}
+          />
+        )}
+
+        {activeTab === 'notes' && (
+          <Notes notes={notes} onUpdateNotes={setNotes} />
+        )}
+
+        {activeTab === 'journal' && (
+          <Journal journal={journal} onUpdateJournal={setJournal} />
         )}
       </div>
     </div>
