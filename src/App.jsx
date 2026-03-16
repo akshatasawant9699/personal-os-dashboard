@@ -123,17 +123,25 @@ function App() {
     setFocusStats(data.focusStats || { totalSessions: 0, totalMinutes: 0, lastSession: null });
   };
 
-  // Authentication listener
+  // Track the UID we've already loaded data for — prevents re-loading when
+  // authoriseCalendar triggers onAuthStateChanged for the same user.
+  const loadedUidRef = useRef(null);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
       setLoading(false);
 
       if (currentUser) {
+        // Skip re-load if we already loaded data for this exact user
+        if (loadedUidRef.current === currentUser.uid) return;
+        loadedUidRef.current = currentUser.uid;
+
         setHasLoadedUserData(false);
         await loadUserDataFromFirestore(currentUser.uid);
         loadCalendarEvents(currentUser.uid);
       } else {
+        loadedUidRef.current = null;
         setHasLoadedUserData(false);
       }
     });
@@ -168,15 +176,15 @@ function App() {
       if (remoteData) {
         const localTs = localData?.lastUpdated || '0';
         const remoteTs = remoteData.lastUpdated || '0';
-        // Only apply remote data when it is strictly newer (cross-device scenario)
-        if (remoteTs > localTs) {
-          console.log('☁️ Firestore is newer, applying remote data');
+        // Apply Firestore data when it's newer OR when localStorage is empty
+        if (!localData || remoteTs >= localTs) {
+          console.log('☁️ Applying Firestore data');
           applyStateFromData(remoteData);
           try {
             localStorage.setItem(`userDataCache_${userId}`, JSON.stringify(remoteData));
           } catch (_) {}
         } else {
-          console.log('💾 localStorage is up-to-date, keeping local data');
+          console.log('💾 localStorage is newer, keeping local data');
         }
         setShowOnboarding(false);
       } else if (!localData) {
@@ -386,11 +394,11 @@ function App() {
         ]).catch(() => {});
       }
 
-      // Remove local cache and Calendar access token
-      try { localStorage.removeItem(`userDataCache_${uid}`); } catch (_) {}
+      // Keep localStorage cache as backup in case the Firestore save above timed out.
+      // On next sign-in, loadUserDataFromFirestore will restore from it.
       latestDataRef.current = null;
+      loadedUidRef.current = null;
 
-      // Firebase sign-out
       await signOutUser(uid);
 
       // Reset all local state for immediate UI feedback
