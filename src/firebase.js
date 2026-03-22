@@ -29,30 +29,9 @@ export const signInWithGoogle = async () => {
   }
 };
 
-// Separate Calendar authorisation — only triggered when user clicks "Sync"
-// This uses a new provider instance with Calendar scopes so the consent
-// screen only appears when the user actually wants Calendar access.
-export const authoriseCalendar = async () => {
-  const calendarProvider = new GoogleAuthProvider();
-  calendarProvider.addScope('https://www.googleapis.com/auth/calendar');
-  calendarProvider.addScope('https://www.googleapis.com/auth/calendar.events');
-
-  const result = await signInWithPopup(auth, calendarProvider);
-  const credential = GoogleAuthProvider.credentialFromResult(result);
-  const accessToken = credential?.accessToken;
-
-  if (accessToken && result.user) {
-    localStorage.setItem(`google_access_token_${result.user.uid}`, accessToken);
-  }
-  return accessToken;
-};
-
 // Sign out
-export const signOutUser = async (uid) => {
+export const signOutUser = async () => {
   try {
-    if (uid) {
-      localStorage.removeItem(`google_access_token_${uid}`);
-    }
     await signOut(auth);
   } catch (error) {
     console.error('Error signing out:', error);

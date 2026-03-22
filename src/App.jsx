@@ -27,9 +27,8 @@ import {
   StickyNote,
   BookOpen,
 } from 'lucide-react';
-import { auth, signInWithGoogle, signOutUser, getUserData, saveUserData, authoriseCalendar } from './firebase';
+import { auth, signInWithGoogle, signOutUser, getUserData, saveUserData } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import { getCalendarEvents, syncTasksToCalendar } from './utils/calendar';
 import Dashboard from './components/Dashboard';
 import FocusTimer from './components/FocusTimer';
 import Notes from './components/Notes';
@@ -85,7 +84,6 @@ function App() {
     done: [],
   });
   const [editingCard, setEditingCard] = useState(null);
-  const [calendarEvents, setCalendarEvents] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedCard, setExpandedCard] = useState(null);
   const [showCardMenu, setShowCardMenu] = useState(null);
@@ -139,7 +137,6 @@ function App() {
 
         setHasLoadedUserData(false);
         await loadUserDataFromFirestore(currentUser.uid);
-        loadCalendarEvents(currentUser.uid);
       } else {
         loadedUidRef.current = null;
         setHasLoadedUserData(false);
@@ -310,20 +307,6 @@ function App() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [user, hasLoadedUserData]);
 
-  // Load calendar events
-  const loadCalendarEvents = async (uid) => {
-    if (!uid) return;
-    const accessToken = localStorage.getItem(`google_access_token_${uid}`);
-    if (accessToken) {
-      try {
-        const events = await getCalendarEvents(accessToken);
-        setCalendarEvents(events);
-      } catch (error) {
-        console.error('Failed to load calendar events:', error);
-      }
-    }
-  };
-
   // Onboarding completion
   const completeOnboarding = async () => {
     const newRoles = customTags
@@ -399,7 +382,7 @@ function App() {
       latestDataRef.current = null;
       loadedUidRef.current = null;
 
-      await signOutUser(uid);
+      await signOutUser();
 
       // Reset all local state for immediate UI feedback
       setRuleOfThree(['', '', '']);
@@ -572,83 +555,6 @@ function App() {
       );
     }
     return filtered;
-  };
-
-  const handleSyncToCalendar = async () => {
-    let accessToken = localStorage.getItem(`google_access_token_${user.uid}`);
-
-    // If no Calendar token, request Calendar access now (separate consent prompt)
-    if (!accessToken) {
-      try {
-        accessToken = await authoriseCalendar();
-        if (!accessToken) {
-          alert('Calendar authorisation was cancelled.');
-          return;
-        }
-      } catch (error) {
-        alert('Could not connect to Google Calendar.\nPlease try again.');
-        return;
-      }
-    }
-
-    // Collect ALL tasks that have a due date (any column)
-    const allTasks = [
-      ...cards.ideas,
-      ...cards.inProgress,
-      ...cards.readyToPublish,
-      ...cards.done,
-    ];
-    const tasksWithDate = allTasks.filter((card) => card.dueDate);
-    const skipped = allTasks.length - tasksWithDate.length;
-
-    if (tasksWithDate.length === 0) {
-      alert('No tasks have a due date set.\nAdd a due date to a task on the board first, then sync.');
-      return;
-    }
-
-    try {
-      const tasksData = tasksWithDate.map((card) => {
-        // Use the card's dueDate as the event start (local time, 9–10 AM)
-        const start = new Date(`${card.dueDate}T09:00:00`);
-        const end = new Date(`${card.dueDate}T10:00:00`);
-        const roleLabels = card.roles
-          .map((r) => userRoles.find((role) => role.id === r)?.label)
-          .filter(Boolean)
-          .join(', ');
-        return {
-          id: card.id,
-          title: card.title,
-          description: [
-            card.description,
-            roleLabels ? `Roles: ${roleLabels}` : '',
-            `Status: ${Object.entries(cards).find(([, col]) => col.some((c) => c.id === card.id))?.[0] ?? ''}`,
-          ].filter(Boolean).join('\n'),
-          startTime: start.toISOString(),
-          endTime: end.toISOString(),
-        };
-      });
-
-      const result = await syncTasksToCalendar(accessToken, tasksData);
-      const msg = [
-        `Synced ${result.syncedTasks.length} task(s) to Google Calendar.`,
-        result.failedTasks.length ? `${result.failedTasks.length} failed.` : '',
-        skipped ? `${skipped} task(s) skipped (no due date).` : '',
-      ].filter(Boolean).join('\n');
-      alert(msg);
-      loadCalendarEvents(user.uid);
-    } catch (error) {
-      const isAuthError = error.message?.toLowerCase().includes('401')
-        || error.message?.toLowerCase().includes('403')
-        || error.message?.toLowerCase().includes('unauthorized')
-        || error.message?.toLowerCase().includes('access token');
-      if (isAuthError) {
-        // Token expired — clear it and retry with fresh authorisation
-        try { localStorage.removeItem(`google_access_token_${user.uid}`); } catch (_) {}
-        alert('Your Calendar access expired. Click Sync again to re-authorise.');
-      } else {
-        alert(`Sync failed: ${error.message}`);
-      }
-    }
   };
 
   // Custom tag management
@@ -983,13 +889,6 @@ function App() {
             </div>
 
             <div className="flex items-center gap-2 sm:gap-4">
-              <button
-                onClick={handleSyncToCalendar}
-                className="px-3 sm:px-4 py-2 bg-gradient-to-r from-blue-400 to-cyan-400 hover:from-blue-500 hover:to-cyan-500 text-white rounded-xl flex items-center gap-2 transition-all transform hover:scale-105 shadow-md text-sm"
-              >
-                <CalendarIcon size={16} />
-                <span className="hidden sm:inline">Sync</span>
-              </button>
               <button
                 onClick={triggerOnboarding}
                 className="p-2 hover:bg-orange-100 rounded-xl transition-colors"
