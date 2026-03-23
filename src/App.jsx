@@ -27,8 +27,15 @@ import {
   StickyNote,
   BookOpen,
 } from 'lucide-react';
-import { auth, signInWithGoogle, signOutUser, getUserData, saveUserData } from './firebase';
-import { onAuthStateChanged } from 'firebase/auth';
+import {
+  supabase,
+  signUpWithEmail,
+  signInWithEmail,
+  signInWithGoogle,
+  signOutUser,
+  getUserData,
+  saveUserData,
+} from './supabase';
 import Dashboard from './components/Dashboard';
 import FocusTimer from './components/FocusTimer';
 import Notes from './components/Notes';
@@ -98,7 +105,7 @@ function App() {
   const [journal, setJournal] = useState([]);
   const [focusStats, setFocusStats] = useState({ totalSessions: 0, totalMinutes: 0, lastSession: null });
 
-  // Always-current ref — written synchronously before every Firestore round-trip
+  // Always-current ref — written synchronously before every save round-trip
   const latestDataRef = useRef(null);
 
   // Apply a saved data object back into all state setters
@@ -121,38 +128,47 @@ function App() {
     setFocusStats(data.focusStats || { totalSessions: 0, totalMinutes: 0, lastSession: null });
   };
 
-  // Track the UID we've already loaded data for — prevents re-loading when
-  // authoriseCalendar triggers onAuthStateChanged for the same user.
   const loadedUidRef = useRef(null);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+    // Check initial session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      const currentUser = session?.user || null;
+      setUser(currentUser);
+      setLoading(false);
+      if (currentUser && loadedUidRef.current !== currentUser.id) {
+        loadedUidRef.current = currentUser.id;
+        setHasLoadedUserData(false);
+        loadUserData(currentUser.id);
+      }
+    });
+
+    // Listen for auth changes (sign-in, sign-out, token refresh)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      const currentUser = session?.user || null;
       setUser(currentUser);
       setLoading(false);
 
       if (currentUser) {
-        // Skip re-load if we already loaded data for this exact user
-        if (loadedUidRef.current === currentUser.uid) return;
-        loadedUidRef.current = currentUser.uid;
-
+        if (loadedUidRef.current === currentUser.id) return;
+        loadedUidRef.current = currentUser.id;
         setHasLoadedUserData(false);
-        await loadUserDataFromFirestore(currentUser.uid);
+        loadUserData(currentUser.id);
       } else {
         loadedUidRef.current = null;
         setHasLoadedUserData(false);
       }
     });
 
-    return () => unsubscribe();
+    return () => subscription.unsubscribe();
   }, []);
 
-  // Load user data: localStorage first (zero network latency), then Firestore
-  const loadUserDataFromFirestore = async (userId) => {
+  const loadUserData = async (userId) => {
     console.log('📂 Loading for:', userId);
 
     // ── Step 1: Restore from localStorage immediately ──────────────────────────
     // localStorage writes are synchronous, so this always has the most recent
-    // local state — even if the user refreshed before the 1.5 s Firestore debounce.
+    // local state — even if the user refreshed before the 1.5 s Supabase debounce.
     let localData = null;
     try {
       const raw = localStorage.getItem(`userDataCache_${userId}`);
@@ -166,16 +182,15 @@ function App() {
       setHasLoadedUserData(true);
     }
 
-    // ── Step 2: Fetch from Firestore for cross-device sync ────────────────────
+    // ── Step 2: Fetch from Supabase for cross-device sync ───────────────────
     try {
       const remoteData = await getUserData(userId);
 
       if (remoteData) {
         const localTs = localData?.lastUpdated || '0';
         const remoteTs = remoteData.lastUpdated || '0';
-        // Apply Firestore data when it's newer OR when localStorage is empty
         if (!localData || remoteTs >= localTs) {
-          console.log('☁️ Applying Firestore data');
+          console.log('☁️ Applying remote data');
           applyStateFromData(remoteData);
           try {
             localStorage.setItem(`userDataCache_${userId}`, JSON.stringify(remoteData));
@@ -189,7 +204,7 @@ function App() {
         setShowOnboarding(true);
       }
     } catch (error) {
-      console.error('❌ Firestore load error:', error);
+      console.error('❌ Remote load error:', error);
       if (!localData) {
         alert('Failed to load your data. Please check your connection.');
       }
@@ -201,9 +216,9 @@ function App() {
   // ── Persistence effect ────────────────────────────────────────────────────────
   // Runs on every state change once data is loaded.
   // • Writes to localStorage IMMEDIATELY (synchronous) → survives hard refresh.
-  // • Debounces a Firestore write by 1.5 s for cloud backup / cross-device sync.
+  // • Debounces a Supabase write by 1.5 s for cloud backup / cross-device sync.
   useEffect(() => {
-    if (!user?.uid || !hasLoadedUserData || showOnboarding) return;
+    if (!user?.id || !hasLoadedUserData || showOnboarding) return;
 
     // Build the snapshot inline so we are 100% sure it captures THIS render's state
     const snapshot = {
@@ -229,20 +244,20 @@ function App() {
     // Synchronous localStorage write — always completes before the page unloads
     latestDataRef.current = snapshot;
     try {
-      localStorage.setItem(`userDataCache_${user.uid}`, JSON.stringify(snapshot));
+      localStorage.setItem(`userDataCache_${user.id}`, JSON.stringify(snapshot));
       console.log('💾 localStorage saved');
     } catch (e) {
       console.warn('localStorage write failed:', e);
     }
 
-    // Debounced Firestore write (cloud backup)
-    const uid = user.uid;
+    // Debounced Supabase write (cloud backup)
+    const uid = user.id;
     const timer = setTimeout(async () => {
       try {
         await saveUserData(uid, snapshot);
-        console.log('☁️ Firestore saved at', new Date().toLocaleTimeString());
+        console.log('☁️ Supabase saved at', new Date().toLocaleTimeString());
       } catch (error) {
-        console.error('❌ Firestore save error:', error);
+        console.error('❌ Supabase save error:', error);
       }
     }, 1500);
 
@@ -296,7 +311,7 @@ function App() {
   // and always completes. We read from the ref (always current) to avoid stale closures.
   useEffect(() => {
     const handleBeforeUnload = () => {
-      const uid = user?.uid;
+      const uid = user?.id;
       if (!uid || !hasLoadedUserData || !latestDataRef.current) return;
       try {
         const snapshot = { ...latestDataRef.current, lastUpdated: new Date().toISOString() };
@@ -343,33 +358,57 @@ function App() {
       lastUpdated: new Date().toISOString(),
     };
 
-    try { localStorage.setItem(`userDataCache_${user.uid}`, JSON.stringify(onboardingData)); } catch (_) {}
+    try { localStorage.setItem(`userDataCache_${user.id}`, JSON.stringify(onboardingData)); } catch (_) {}
     latestDataRef.current = onboardingData;
-    await saveUserData(user.uid, onboardingData);
+    await saveUserData(user.id, onboardingData);
 
     setShowOnboarding(false);
     setHasLoadedUserData(true);
   };
 
-  // Sign in/out
-  const handleSignIn = async () => {
+  // Auth form state
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authMode, setAuthMode] = useState('signin'); // 'signin' or 'signup'
+  const [authError, setAuthError] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
+
+  const handleEmailAuth = async (e) => {
+    e.preventDefault();
+    setAuthError('');
+    setAuthLoading(true);
+    try {
+      if (authMode === 'signup') {
+        await signUpWithEmail(authEmail, authPassword);
+      } else {
+        await signInWithEmail(authEmail, authPassword);
+      }
+    } catch (error) {
+      setAuthError(error.message);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    setAuthError('');
     try {
       await signInWithGoogle();
     } catch (error) {
-      alert('Failed to sign in: ' + error.message);
+      setAuthError(error.message);
     }
   };
 
   const handleSignOut = async () => {
     if (!user || signingOut) return;
-    const uid = user.uid;
+    const uid = user.id;
 
     setSigningOut(true);
     // Disable persistence effect so state resets below don't overwrite localStorage
     setHasLoadedUserData(false);
 
     try {
-      // Best-effort final Firestore save — give it 3 s max so we don't hang
+      // Best-effort final Supabase save — give it 3 s max so we don't hang
       if (latestDataRef.current) {
         await Promise.race([
           saveUserData(uid, latestDataRef.current),
@@ -377,8 +416,7 @@ function App() {
         ]).catch(() => {});
       }
 
-      // Keep localStorage cache as backup in case the Firestore save above timed out.
-      // On next sign-in, loadUserDataFromFirestore will restore from it.
+      // Keep localStorage cache as backup in case the Supabase save above timed out.
       latestDataRef.current = null;
       loadedUidRef.current = null;
 
@@ -704,21 +742,76 @@ function App() {
 
   if (!user) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-amber-100 via-orange-100 to-yellow-100">
-        <div className="text-center space-y-8 p-8 bg-white/70 backdrop-blur-sm rounded-3xl shadow-2xl border-2 border-orange-200">
-          <div className="space-y-4">
-            <div className="text-6xl animate-float">☀️</div>
-            <h1 className="text-6xl font-bold gradient-summer">
-              Personal Kanban
-            </h1>
-            <p className="text-2xl text-gray-700 font-light">Daily Productivity App</p>
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-amber-100 via-orange-100 to-yellow-100 p-4">
+        <div className="w-full max-w-md bg-white/80 backdrop-blur-sm rounded-3xl shadow-2xl border-2 border-orange-200 p-8">
+          <div className="text-center space-y-3 mb-8">
+            <div className="text-5xl">☀️</div>
+            <h1 className="text-4xl font-bold gradient-summer">Personal Kanban</h1>
+            <p className="text-gray-600">Daily Productivity App</p>
           </div>
+
+          <form onSubmit={handleEmailAuth} className="space-y-4">
+            <div>
+              <input
+                type="email"
+                value={authEmail}
+                onChange={(e) => setAuthEmail(e.target.value)}
+                placeholder="Email address"
+                required
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent"
+              />
+            </div>
+            <div>
+              <input
+                type="password"
+                value={authPassword}
+                onChange={(e) => setAuthPassword(e.target.value)}
+                placeholder="Password (min 6 characters)"
+                required
+                minLength={6}
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent"
+              />
+            </div>
+
+            {authError && (
+              <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                {authError}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={authLoading}
+              className="w-full py-3 bg-gradient-to-r from-orange-400 to-amber-400 text-white rounded-xl font-semibold hover:from-orange-500 hover:to-amber-500 transition-all disabled:opacity-50"
+            >
+              {authLoading ? 'Please wait...' : authMode === 'signup' ? 'Create Account' : 'Sign In'}
+            </button>
+          </form>
+
+          <div className="mt-4 text-center">
+            <button
+              onClick={() => { setAuthMode(authMode === 'signin' ? 'signup' : 'signin'); setAuthError(''); }}
+              className="text-sm text-orange-600 hover:underline"
+            >
+              {authMode === 'signin' ? "Don't have an account? Sign up" : 'Already have an account? Sign in'}
+            </button>
+          </div>
+
+          <div className="relative my-6">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-gray-200"></div>
+            </div>
+            <div className="relative flex justify-center text-xs">
+              <span className="bg-white/80 px-3 text-gray-500">or</span>
+            </div>
+          </div>
+
           <button
-            onClick={handleSignIn}
-            className="px-8 py-4 bg-gradient-to-r from-orange-400 to-amber-400 text-white rounded-2xl font-semibold hover:from-orange-500 hover:to-amber-500 transition-all transform hover:scale-105 flex items-center gap-3 mx-auto shadow-lg"
+            onClick={handleGoogleSignIn}
+            className="w-full py-3 bg-white border border-gray-300 text-gray-700 rounded-xl font-medium hover:bg-gray-50 transition-colors flex items-center justify-center gap-2 text-sm"
           >
-            <User size={24} />
-            Sign in with Google
+            <svg className="w-4 h-4" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+            Continue with Google
           </button>
         </div>
       </div>
@@ -897,8 +990,12 @@ function App() {
                 <Settings size={18} className="text-gray-600" />
               </button>
               <div className="hidden md:flex items-center gap-3 pl-3 border-l border-gray-200">
-                <img src={user.photoURL} alt={user.displayName} className="w-7 h-7 rounded-full" />
-                <span className="text-sm text-gray-700">{user.displayName}</span>
+                {user.user_metadata?.avatar_url && (
+                  <img src={user.user_metadata.avatar_url} alt="" className="w-7 h-7 rounded-full" />
+                )}
+                <span className="text-sm text-gray-700">
+                  {user.user_metadata?.full_name || user.email?.split('@')[0] || 'User'}
+                </span>
               </div>
               <button
                 onClick={handleSignOut}
